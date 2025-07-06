@@ -351,9 +351,6 @@ The Profile page allows users to manage their personal account information and s
 - Contact admin for access issues
 - Check if account is active
 
-### Support:
-For technical support or questions about system usage, contact your system administrator or IT support team.
-
 ---
 
 *Last Updated: July 6, 2025*
