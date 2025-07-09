@@ -1,0 +1,37 @@
+.activity-header {
+  margin-bottom: 24px;
+}
+
+.activity-header h2 {
+  margin-bottom: 8px;
+}
+
+.activity-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.activity-stat-icon {
+  font-size: 20px;
+}
+
+.activity-stat-content {
+  flex: 1;
+  text-align: left;
+}
+
+@media (max-width: 768px) {
+  .activity-header h2 {
+    font-size: 20px;
+  }
+
+  .activity-stat {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .activity-stat-icon {
+    font-size: 24px;
+  }
+}

@@ -1,0 +1,191 @@
+/* Fixed Layout Styles */
+.main-layout {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main-layout .ant-layout-sider {
+  transition: all 0.2s;
+}
+
+.main-layout .ant-layout-sider.ant-layout-sider-collapsed {
+  width: 80px !important;
+  min-width: 80px !important;
+}
+
+.main-layout .ant-layout-header {
+  transition: all 0.2s;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.main-layout .ant-layout-content {
+  transition: all 0.2s;
+}
+
+/* Scrollbar styling for sidebar */
+.main-layout .ant-layout-sider::-webkit-scrollbar {
+  width: 6px;
+}
+
+.main-layout .ant-layout-sider::-webkit-scrollbar-track {
+  background: #001529;
+}
+
+.main-layout .ant-layout-sider::-webkit-scrollbar-thumb {
+  background: #1890ff;
+  border-radius: 3px;
+}
+
+.main-layout .ant-layout-sider::-webkit-scrollbar-thumb:hover {
+  background: #40a9ff;
+}
+
+/* Menu styling */
+.main-layout .ant-menu-dark {
+  background: transparent;
+}
+
+.main-layout .ant-menu-dark .ant-menu-item {
+  margin: 0;
+  width: 100%;
+  border-radius: 0;
+}
+
+.main-layout .ant-menu-dark .ant-menu-item:hover {
+  background-color: rgba(24, 144, 255, 0.1);
+}
+
+.main-layout .ant-menu-dark .ant-menu-item-selected {
+  background-color: #1890ff !important;
+}
+
+/* Content area styling */
+.page-content {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px;
+  min-height: calc(100vh - 160px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .main-layout .ant-layout-sider {
+    transform: translateX(-100%);
+  }
+  
+  .main-layout .ant-layout-sider:not(.ant-layout-sider-collapsed) {
+    transform: translateX(0);
+  }
+  
+  .page-content {
+    padding: 16px;
+    margin: 16px 8px;
+  }
+}
+
+/* Animation for smooth transitions */
+.main-layout * {
+  transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+/* Header logo animation */
+.header-logo {
+  transition: all 0.3s ease;
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* Menu item icons */
+.main-layout .ant-menu-item .anticon {
+  font-size: 16px;
+  margin-right: 8px;
+}
+
+.main-layout .ant-layout-sider-collapsed .ant-menu-item .anticon {
+  margin-right: 0;
+  font-size: 18px;
+}
+
+/* Header buttons */
+.header-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.header-button:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+/* Content scroll enhancement */
+.ant-layout-content {
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.ant-layout-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ant-layout-content::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.ant-layout-content::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+.ant-layout-content::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Page headers */
+.page-header {
+  position: sticky;
+  top: -24px;
+  background: #fff;
+  z-index: 10;
+  padding: 24px 0 16px;
+  margin: -24px -24px 24px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.page-header h1,
+.page-header h2 {
+  margin-bottom: 8px;
+}
+
+/* Loading states */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* Responsive table wrapper */
+.table-responsive {
+  overflow-x: auto;
+  margin: -24px;
+  padding: 24px;
+}
+
+@media (max-width: 768px) {
+  .table-responsive {
+    margin: -16px;
+    padding: 16px;
+  }
+}

@@ -1,0 +1,428 @@
+.product-dashboard-container {
+  padding: 0px;
+  background: #f0f2f5;
+  min-height: 100vh;
+}
+
+.dashboard-header {
+  text-align: center;
+  margin-bottom: 32px;
+  padding: 32px 24px;
+  background: linear-gradient(135deg, #1890ff 0%, #722ed1 100%);
+  border-radius: 12px;
+  color: white;
+  box-shadow: 0 4px 16px rgba(24, 144, 255, 0.2);
+}
+
+.dashboard-header .dashboard-title {
+  color: white !important;
+  margin-bottom: 8px;
+  font-size: 2.5em;
+  font-weight: 600;
+}
+
+.dashboard-subtitle {
+  font-size: 1.2em;
+  margin: 0;
+  opacity: 0.9;
+}
+
+
+.dashboard-card {
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  border: none;
+  overflow: hidden;
+}
+
+.dashboard-card:hover {
+  /* box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15); */
+  transform: translateY(-2px);
+}
+
+.dashboard-card .ant-card-head {
+  border-bottom: 2px solid #f0f0f0;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%);
+}
+
+.dashboard-card .ant-card-head-title {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.dashboard-card .ant-card-body {
+  padding: 24px;
+}
+
+.metric-card {
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  border: none;
+  overflow: hidden;
+}
+
+.metric-card:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  transform: translateY(-4px);
+}
+
+.metric-card .ant-card-body {
+  padding: 20px;
+}
+
+.metric-card .ant-statistic-title {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+
+.metric-card .ant-statistic-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.metric-card .anticon {
+  font-size: 1.5em;
+}
+
+.health-score-card .ant-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.metrics-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+}
+
+.dashboard-card .ant-card-body {
+  padding: 24px;
+}
+
+.dashboard-card .ant-statistic-title {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.dashboard-card .ant-statistic-content {
+  color: #1890ff;
+  font-weight: bold;
+}
+
+/* Stock row styling */
+.stock-in-row {
+  background-color: #f6ffed;
+  border-left: 4px solid #52c41a;
+  transition: all 0.3s ease;
+}
+
+.stock-out-row {
+  background-color: #fff2f0;
+  border-left: 4px solid #ff4d4f;
+  transition: all 0.3s ease;
+}
+
+.stock-in-row:hover {
+  background-color: #f0f9e8;
+}
+
+.stock-out-row:hover {
+  background-color: #ffebe8;
+}
+
+/* Custom styling for progress bars */
+.ant-progress-line {
+  margin-bottom: 0;
+}
+
+.ant-progress-text {
+  color: #666;
+  font-size: 12px;
+}
+
+.ant-progress-bg {
+  border-radius: 8px;
+}
+
+.ant-progress-inner {
+  border-radius: 8px;
+}
+
+/* Table styling */
+.ant-table-tbody > tr > td {
+  padding: 12px 16px;
+  vertical-align: middle;
+}
+
+.ant-table-thead > tr > th {
+  background-color: #fafafa;
+  font-weight: 600;
+  color: #262626;
+  border-bottom: 2px solid #e8e8e8;
+  padding: 16px;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background-color: #f5f5f5;
+}
+
+.ant-table-pagination {
+  padding: 16px;
+  text-align: center;
+}
+
+/* Button styling */
+.ant-btn {
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.ant-btn:hover {
+  transform: translateY(-1px);
+}
+
+/* Tag styling */
+.ant-tag {
+  border-radius: 6px;
+  font-weight: 500;
+  padding: 4px 8px;
+}
+
+/* Select styling */
+.ant-select {
+  border-radius: 6px;
+}
+
+.ant-select-selector {
+  border-radius: 6px !important;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+  .product-dashboard-container {
+    padding: 16px;
+  }
+  
+  .dashboard-header {
+    padding: 24px 16px;
+    margin-bottom: 24px;
+  }
+  
+  .dashboard-header .dashboard-title {
+    font-size: 2em;
+  }
+  
+  .dashboard-subtitle {
+    font-size: 1.1em;
+  }
+}
+
+@media (max-width: 768px) {
+  .product-dashboard-container {
+    padding: 12px;
+  }
+  
+  .dashboard-header {
+    padding: 20px 12px;
+    margin-bottom: 20px;
+  }
+  
+  .dashboard-header .dashboard-title {
+    font-size: 1.8em;
+  }
+  
+  .dashboard-subtitle {
+    font-size: 1em;
+  }
+  
+  .dashboard-card {
+    margin-bottom: 16px;
+  }
+  
+  .dashboard-card .ant-card-body {
+    padding: 16px;
+  }
+  
+  .metric-card .ant-card-body {
+    padding: 16px;
+  }
+  
+  .metric-card .ant-statistic-content {
+    font-size: 1.5em;
+  }
+  
+  .dashboard-controls .ant-card-body {
+    padding: 16px;
+  }
+  
+  .ant-table-tbody > tr > td {
+    padding: 8px 12px;
+  }
+  
+  .ant-table-thead > tr > th {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 576px) {
+  .product-dashboard-container {
+    padding: 8px;
+  }
+  
+  .dashboard-header {
+    padding: 16px 8px;
+    margin-bottom: 16px;
+  }
+  
+  .dashboard-header .dashboard-title {
+    font-size: 1.5em;
+  }
+  
+  .dashboard-subtitle {
+    font-size: 0.9em;
+  }
+  
+  .dashboard-card .ant-card-body {
+    padding: 12px;
+  }
+  
+  .metric-card .ant-card-body {
+    padding: 12px;
+  }
+  
+  .metric-card .ant-statistic-content {
+    font-size: 1.3em;
+  }
+  
+  .dashboard-controls .ant-card-body {
+    padding: 12px;
+  }
+  
+  .ant-space-item {
+    margin-bottom: 8px;
+  }
+}
+
+/* Chart styles */
+.dashboard-card .ant-card-body {
+  padding: 16px;
+}
+
+.dashboard-card .ant-table-small > .ant-table-content > .ant-table-body {
+  margin: 0;
+}
+
+/* Empty state styling */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: #999;
+}
+
+.empty-state .anticon {
+  font-size: 48px;
+  color: #d9d9d9;
+  margin-bottom: 16px;
+}
+
+.empty-state-success {
+  color: #52c41a;
+}
+
+.empty-state-success .anticon {
+  color: #52c41a;
+}
+
+/* Loading states */
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+}
+
+/* Chart container styling */
+.chart-container {
+  height: 300px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Status badges */
+.status-badge {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dashboard-card {
+  animation: fadeIn 0.6s ease-out;
+}
+
+/* Gradient backgrounds */
+.gradient-bg-primary {
+  background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+}
+
+.gradient-bg-success {
+  background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+}
+
+.gradient-bg-warning {
+  background: linear-gradient(135deg, #fa8c16 0%, #d46b08 100%);
+}
+
+.gradient-bg-danger {
+  background: linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%);
+}
+
+/* Improved spacing for mobile */
+@media (max-width: 480px) {
+  .ant-col {
+    margin-bottom: 16px;
+  }
+  
+  .ant-space-item {
+    margin-bottom: 8px;
+  }
+  
+  .dashboard-card .ant-card-head {
+    padding: 12px 16px;
+  }
+  
+  .dashboard-card .ant-card-head-title {
+    font-size: 14px;
+  }
+  
+  .metric-card .ant-statistic-title {
+    font-size: 12px;
+  }
+  
+  .metric-card .ant-statistic-content {
+    font-size: 1.2em;
+  }
+}
