@@ -1,357 +1,325 @@
-# Eco-S Order Management System - Usage Documentation
-
-## Table of Contents
-1. [Dashboard](#dashboard)
-2. [Orders Management](#orders-management)
-3. [User Management](#user-management)
-4. [Activity Logs (Reports)](#activity-logs-reports)
-5. [Session Time Tracking](#session-time-tracking)
-6. [Profile Management](#profile-management)
-
----
-
-## Dashboard
-
-The Dashboard provides a comprehensive overview of the system's performance and key metrics.
-
-### Features:
-- **Order Statistics Cards**: Display total orders, pending orders, delivered orders, and revenue
-- **Order Trends Chart**: Interactive line chart showing order trends over time
-- **Order Status Distribution**: Pie chart showing distribution of orders by status
-- **Performance Metrics**: Bar chart showing user performance data
-- **Recent Activities**: Quick overview of recent system activities
-
-### Functions:
-- **Auto-refresh**: Dashboard data updates automatically
-- **Interactive Charts**: Click on chart elements for detailed views
-- **Date Range Selection**: Filter data by custom date ranges
-- **Export Data**: Export dashboard data to CSV/Excel
-
-### User Roles:
-- **Admin**: Full access to all metrics and data
-- **Employee**: Limited view based on assigned orders
+# 🛍️ Guide d'Utilisation 
+ https://api.albech.me
+## 📋 Table des Matières
+1. [Introduction](#introduction)
+2. [Connexion au système](#connexion)
+3. [Tableau de bord](#tableau-de-bord)
+4. [Gestion des commandes](#gestion-des-commandes)
+5. [Suivi des commandes](#suivi-des-commandes)
+6. [Gestion des produits et stock](#gestion-des-produits)
+7. [Rapports et statistiques](#rapports-et-statistiques)
+8. [Profil utilisateur](#profil-utilisateur)
+9. [Langues et paramètres](#langues-et-paramètres)
+10. [Conseils et bonnes pratiques](#conseils)
+11. [FAQ - Questions fréquentes](#faq)
 
 ---
 
-## Orders Management
+## 🌟 Introduction {#introduction}
 
-The Orders page is the core of the system for managing customer orders and delivery tracking.
+Bienvenue dans le système de gestion des commandes **Eco-S** ! Cette plateforme vous permet de gérer facilement toutes vos commandes avec paiement à la livraison. Le système est disponible en **français**, **anglais** et **arabe** avec support de l'écriture de droite à gauche.
 
-### Features:
-- **Order Listing**: Paginated table with all orders
-- **Advanced Filtering**: Filter by status, assigned user, customer name, order number, dates
-- **Order Creation**: Create new orders with customer and product details
-- **Order Editing**: Update order information, status, and assignments
-- **Order Assignment**: Assign orders to specific staff members
-- **Bulk Import**: Import orders from Excel/CSV files
-- **Export Orders**: Export filtered orders to CSV format
-- **Status Tracking**: Track order progression through different statuses
-
-### Functions:
-
-#### Order Creation:
-1. Click "Add Order" button
-2. Fill in customer information (name, phone, address, city)
-3. Add product details and pricing
-4. Set delivery date and notes
-5. Save to create order
-
-#### Order Management:
-- **View**: Click on order row to view details
-- **Edit**: Click edit button to modify order information
-- **Assign**: Use assign button to assign order to staff member
-- **Status Update**: Change order status from dropdown
-- **Delete**: Remove orders (admin only)
-
-#### Import Orders:
-1. Click "Import Orders" button
-2. Upload Excel/CSV file with order data
-3. Review import summary
-4. Confirm import to add orders to system
-
-#### Export Orders:
-1. Apply desired filters (status, date range, assigned user)
-2. Click "Export" button
-3. Choose CSV format
-4. Download will start automatically
-
-### Order Statuses:
-- **Pending**: Newly created orders awaiting confirmation
-- **Confirmed**: Verified orders ready for processing
-- **Processing**: Orders being prepared for shipment
-- **Out for Delivery**: Orders dispatched to customers
-- **Delivered**: Successfully completed orders
-- **Cancelled**: Orders that were cancelled
-- **Returned**: Orders returned by customers
-- **On Hold**: Orders temporarily paused
-
-### User Roles:
-- **Admin**: Full access to all orders and management functions
-- **Employee**: Access to assigned orders and limited management functions
+### Que peut faire ce système ?
+- ✅ Gérer les commandes clients
+- ✅ Suivre l'état des livraisons
+- ✅ Gérer les produits et le stock
+- ✅ Distribuer les tâches aux employés
+- ✅ Générer des rapports de performance
+- ✅ Intégrer avec Google Sheets
+- ✅ Support multilingue (FR/EN/AR)
 
 ---
 
-## User Management
+## 🔐 Connexion au Système {#connexion}
 
-The Users page allows administrators to manage staff accounts and permissions.
+### Comment se connecter
+1. **Ouvrez votre navigateur web** (Chrome, Firefox, Safari, Edge)
+2. **Tapez l'adresse du site** fournie par votre administrateur
+3. **Entrez vos identifiants** :
+   - Nom d'utilisateur ou email
+   - Mot de passe
+4. **Cliquez sur "Se connecter"**
 
-### Features:
-- **User Listing**: Table of all system users with details
-- **User Creation**: Add new staff members
-- **User Editing**: Update user information and roles
-- **Performance Tracking**: View user performance metrics
-- **Account Status**: Activate/deactivate user accounts
-- **Role Management**: Assign admin or employee roles
+### Types d'utilisateurs
+- **👑 Administrateur** : Accès complet à toutes les fonctionnalités
+- **👥 Superviseur** : Gestion d'équipe et supervision des commandes
+- **👤 Employé** : Traitement des commandes assignées
+- **🔧 Personnalisé** : Accès limité selon les permissions
 
-### Functions:
-
-#### Create User:
-1. Click "Add User" button
-2. Enter user details (username, email, name, phone)
-3. Set password and confirm
-4. Assign role (Admin/Employee)
-5. Save to create account
-
-#### Edit User:
-1. Click edit button on user row
-2. Update user information
-3. Change role if needed
-4. Save changes
-
-#### User Performance:
-- View total orders handled
-- Check performance scores
-- Monitor activity levels
-
-### User Roles:
-- **Admin**: Full access to user management
-- **Employee**: Cannot access user management
+> **💡 Conseil** : Si vous oubliez votre mot de passe, contactez votre administrateur.
 
 ---
 
-## Activity Logs (Reports)
+## 📊 Tableau de Bord {#tableau-de-bord}
 
-The Activity Logs page provides comprehensive tracking and reporting of all system activities.
+Le tableau de bord est votre **page d'accueil** après connexion. Il affiche un résumé de vos activités.
 
-### Features:
-- **Activity Timeline**: Chronological list of all system activities
-- **Advanced Filtering**: Filter by user, activity type, date range
-- **Activity Statistics**: Overview cards showing activity counts by type
-- **User Filter**: Filter activities by specific users
-- **Grouping Options**: Group activities by day, month, or year
-- **Detailed Metadata**: View detailed information about each activity
-- **Pagination**: Navigate through large datasets efficiently
+### Ce que vous voyez sur le tableau de bord
 
-### Functions:
+#### 📈 Statistiques Principales
+- **Commandes totales** : Nombre total de commandes
+- **Commandes en attente** : Commandes non encore traitées
+- **Commandes confirmées** : Commandes acceptées et en cours
+- **Commandes livrées** : Commandes complétées avec succès
 
-#### View Activities:
-- Browse chronological list of all activities
-- See activity type, user, timestamp, and description
-- View detailed metadata for complex activities
+#### 📋 Commandes Récentes
+- Liste des dernières commandes créées
+- Informations client (nom, téléphone)
+- État actuel de chaque commande
+- Montant de la commande
 
-#### Filter Activities:
-1. **Date Range**: Select start and end dates using date picker
-2. **Activity Type**: Choose from dropdown (login, logout, order actions, etc.)
-3. **User Filter**: Select specific user from dropdown
-4. **Apply Filters**: Activities update automatically
+#### 📊 Graphiques (pour Administrateurs/Superviseurs)
+- **Graphique en secteurs** : Répartition des commandes par statut
+- **Graphique de tendances** : Évolution des commandes dans le temps
+- **Performance d'équipe** : Classement des employés
 
-#### Group Activities:
-- **By Day**: Group activities by individual days
-- **By Month**: Group activities by months
-- **By Year**: Group activities by years
-- **No Grouping**: Show individual activities
-
-#### Activity Types Tracked:
-- **Login/Logout**: User authentication activities
-- **Order Created**: New order creation
-- **Order Updated**: Order modifications
-- **Order Assigned**: Order assignments to users
-- **Order Imported**: Bulk order imports
-- **Order Exported**: Data export activities
-- **User Updates**: User account modifications
-- **Page Views**: Page navigation tracking
-
-### User Roles:
-- **Admin**: Full access to all user activities
-- **Employee**: Limited to own activities
+### Actions Rapides (selon vos permissions)
+- **📤 Importer des commandes** : Charger des commandes depuis Excel
+- **🔄 Distribuer les commandes** : Assigner des commandes aux employés
+- **📊 Actualiser les données** : Mettre à jour les statistiques
 
 ---
 
-## Session Time Tracking
+## 🛒 Gestion des Commandes {#gestion-des-commandes}
 
-The Session Time Tracking page provides detailed insights into user login sessions and time management.
+### Voir les Commandes
 
-### Features:
-- **Active Sessions**: View currently active user sessions
-- **Session History**: Historical record of all sessions
-- **Time Analytics**: Track session duration and patterns
-- **Session Management**: End active sessions (admin only)
-- **Performance Metrics**: Analyze user engagement and activity
+#### Pour les Administrateurs/Superviseurs
+Vous avez accès à **plusieurs onglets** :
+- **📋 Toutes les commandes** : Vue complète de toutes les commandes
+- **❌ Non assignées** : Commandes sans employé désigné
+- **✅ Assignées** : Commandes avec un employé responsable
+- **⚠️ En retard** : Commandes de plus de 7 jours non livrées
 
-### Functions:
+#### Pour les Employés
+Vous voyez :
+- **📝 Mes commandes** : Toutes vos commandes assignées
+- **⚠️ En retard** : Vos commandes en retard
 
-#### View Sessions:
-- See all active and historical sessions
-- Monitor session duration and activity
-- Track login/logout times
+### Informations des Commandes
+Chaque commande affiche :
+- **🔢 Numéro de commande** : Identifiant unique
+- **👤 Nom du client** : Nom complet
+- **📞 Téléphone** : Numéro de contact
+- **📍 Adresse** : Adresse de livraison complète
+- **🏙️ Ville/Wilaya** : Localisation
+- **📦 Produit** : Nom et variante du produit
+- **💰 Montant** : Prix total
+- **📅 Date de création** : Quand la commande a été créée
+- **👨‍💼 Assigné à** : Employé responsable
+- **🔄 Statut** : État actuel
 
-#### Session Management (Admin):
-- Force end active sessions
-- Monitor user activity levels
-- Analyze usage patterns
+### États des Commandes
+- **🟡 En attente (pending)** : Nouvelle commande
+- **🔵 Confirmée (confirmed)** : Client a confirmé
+- **🚚 En livraison (shipped)** : Colis expédié
+- **✅ Livrée (delivered)** : Commande complétée
+- **❌ Annulée (cancelled)** : Commande annulée
+- **↩️ Retournée (returned)** : Colis retourné
 
-#### Filter Sessions:
-- Filter by user
-- Filter by date range
-- Filter by session status (active/ended)
+### Créer une Nouvelle Commande
+1. **Cliquez sur le bouton "Nouvelle commande"**
+2. **Remplissez les informations client** :
+   - Nom complet
+   - Numéro de téléphone
+   - Adresse complète
+   - Ville et wilaya
+3. **Sélectionnez le produit et sa variante**
+4. **Vérifiez le montant**
+5. **Cliquez sur "Créer"**
 
-### Metrics Displayed:
-- **Session Duration**: Total time logged in
-- **Activity Level**: User engagement during session
-- **Login Frequency**: How often users log in
-- **Peak Usage Times**: When system is most active
+### Modifier une Commande
+1. **Trouvez la commande** dans la liste
+2. **Cliquez sur l'icône de modification** ✏️
+3. **Changez les informations nécessaires**
+4. **Sauvegardez** les modifications
 
-### User Roles:
-- **Admin**: Full access to all user sessions
-- **Employee**: View own sessions only
-
----
-
-## Profile Management
-
-The Profile page allows users to manage their personal account information and settings.
-
-### Features:
-- **Personal Information**: Update name, email, phone number
-- **Password Management**: Change account password
-- **Language Selection**: Choose interface language (English, French, Arabic)
-- **Profile Picture**: Upload and manage profile image
-- **Account Settings**: Configure personal preferences
-
-### Functions:
-
-#### Update Profile:
-1. Navigate to Profile page
-2. Edit personal information fields
-3. Save changes
-
-#### Change Password:
-1. Click "Change Password"
-2. Enter current password
-3. Enter new password and confirm
-4. Save to update
-
-#### Language Settings:
-- Select from English, French, or Arabic
-- Interface updates immediately
-- Preference saved for future sessions
-
-### Security Features:
-- Password complexity requirements
-- Session timeout management
-- Login history tracking
-
-### User Roles:
-- **All Users**: Full access to own profile management
+### Filtrer et Rechercher
+- **🔍 Barre de recherche** : Tapez le nom du client ou numéro de commande
+- **📋 Filtre par statut** : Sélectionnez un état spécifique
+- **👤 Filtre par employé** : Voir les commandes d'un employé (Admin seulement)
 
 ---
 
-## General System Features
+## 📍 Suivi des Commandes {#suivi-des-commandes}
 
-### Multi-Language Support:
-- **English**: Default language
-- **French**: Full French translation
-- **Arabic**: Complete Arabic translation with RTL support
+### Mettre à Jour l'État d'une Commande
+1. **Ouvrez la commande** en cliquant dessus
+2. **Changez le statut** selon la situation :
+   - ⏳ **En attente** → 🔵 **Confirmée** (après contact client)
+   - 🔵 **Confirmée** → 🚚 **En livraison** (colis expédié)
+   - 🚚 **En livraison** → ✅ **Livrée** (livraison réussie)
+   - Ou ❌ **Annulée**/↩️ **Retournée** si problème
+3. **Ajoutez un commentaire** si nécessaire
+4. **Sauvegardez**
 
-### Authentication & Security:
-- **JWT Token Authentication**: Secure session management
-- **Role-Based Access Control**: Different permissions for admin/employee
-- **Session Management**: Automatic logout for security
-- **Password Security**: Encrypted password storage
+### Historique des Modifications
+Chaque commande garde un **historique complet** :
+- Qui a fait quoi et quand
+- Changements de statut
+- Commentaires ajoutés
+- Dates de chaque action
 
-### Data Export/Import:
-- **Excel Import**: Support for .xlsx and .csv files
-- **CSV Export**: Download filtered data sets
-- **Bulk Operations**: Handle large datasets efficiently
-
-### Responsive Design:
-- **Mobile Friendly**: Works on phones and tablets
-- **Desktop Optimized**: Full feature set on desktop
-- **Cross-Browser**: Compatible with modern browsers
-
-### Real-Time Features:
-- **Auto-Refresh**: Data updates automatically
-- **Activity Tracking**: Real-time activity logging
-- **Session Monitoring**: Live session status updates
+### Intégration Ecotrack
+Si votre commande est liée à **Ecotrack** :
+- Le suivi sera automatiquement synchronisé
+- Vous verrez l'icône de synchronisation 🔄
+- Les mises à jour de livraison seront automatiques
 
 ---
 
-## Common Operations
+## 📦 Gestion des Produits et Stock {#gestion-des-produits}
 
-### Creating Orders:
-1. Navigate to Orders page
-2. Click "Add Order" button
-3. Fill customer information
-4. Add product details
-5. Set delivery preferences
-6. Save order
+### Voir les Produits
+- **Liste complète** de tous vos produits
+- **Informations** : nom, SKU, prix, stock disponible
+- **Catégories** pour organiser vos produits
+- **Variantes** (tailles, couleurs, etc.)
 
-### Managing Order Status:
-1. Find order in Orders table
-2. Click status dropdown
-3. Select new status
-4. Confirm change
-5. Status updates with timestamp
+### Gérer le Stock
+- **📊 Niveaux de stock** actuels
+- **⚠️ Alertes stock faible** automatiques
+- **📈 Mouvements de stock** (entrées/sorties)
+- **📍 Emplacements** multiples
 
-### Assigning Orders:
-1. Select order from table
-2. Click "Assign" button
-3. Choose staff member from dropdown
-4. Confirm assignment
-5. Order appears in assignee's list
-
-### Importing Orders:
-1. Prepare Excel/CSV file with required columns
-2. Click "Import Orders" button
-3. Upload file
-4. Review mapping and preview
-5. Confirm import
-6. Check import results
-
-### Viewing Reports:
-1. Navigate to Activity Logs page
-2. Set desired filters (date, user, type)
-3. Review activity statistics
-4. Use grouping for summary views
-5. Export data if needed
+### Actions sur les Produits
+- **➕ Ajouter** un nouveau produit
+- **✏️ Modifier** les informations
+- **🗂️ Organiser** par catégories
+- **📊 Suivre** les mouvements
 
 ---
 
-## Troubleshooting
+## 📊 Rapports et Statistiques {#rapports-et-statistiques}
 
-### Common Issues:
+### Types de Rapports Disponibles
 
-#### Login Problems:
-- Check username and password
-- Ensure account is active
-- Contact admin if account is locked
+#### 📈 Rapports de Vente
+- **Ventes par période** (jour, semaine, mois)
+- **Produits les plus vendus**
+- **Performance par ville/wilaya**
+- **Tendances de revenus**
 
-#### Data Not Loading:
-- Check internet connection
-- Refresh the page
-- Clear browser cache
+#### 👥 Rapports d'Équipe
+- **Performance des employés**
+- **Taux de livraison réussis**
+- **Temps de traitement moyen**
+- **Classement des équipes**
 
-#### Import Failures:
-- Verify file format (Excel/CSV)
-- Check required columns are present
-- Ensure data format is correct
+#### 📊 Rapports de Stock
+- **État du stock par produit**
+- **Mouvements récents**
+- **Alertes stock faible**
+- **Historique des approvisionnements**
 
-#### Permission Errors:
-- Verify user role permissions
-- Contact admin for access issues
-- Check if account is active
+### Comment Générer un Rapport
+1. **Allez dans la section "Rapports"**
+2. **Choisissez le type** de rapport souhaité
+3. **Sélectionnez la période** (dates de début et fin)
+4. **Appliquez les filtres** si nécessaire
+5. **Cliquez sur "Générer"**
+6. **Exportez** en Excel si souhaité
 
 ---
 
-*Last Updated: July 6, 2025*
-*Version: 1.0*
+## 👤 Profil Utilisateur {#profil-utilisateur}
+
+### Gestion de Votre Profil
+- **👤 Informations personnelles** : nom, prénom, email
+- **🔒 Changer le mot de passe**
+- **🎯 Voir vos permissions**
+- **📊 Vos statistiques personnelles**
+
+### Comment Modifier Votre Profil
+1. **Cliquez sur votre nom** en haut à droite
+2. **Sélectionnez "Profil"**
+3. **Modifiez** les informations souhaitées
+4. **Sauvegardez** les changements
+
+---
+
+## 🌍 Langues et Paramètres {#langues-et-paramètres}
+
+### Changer la Langue
+1. **Cliquez sur l'icône langue** 🌍 en haut à droite
+2. **Choisissez** votre langue :
+   - 🇫🇷 **Français**
+   - 🇬🇧 **English**
+   - 🇩🇿 **العربية** (avec support droite-à-gauche)
+
+### Interface Adaptative
+- **📱 Mobile-friendly** : Fonctionne sur téléphone et tablette
+- **🔄 Mise à jour automatique** des données
+- **💾 Sauvegarde automatique** de vos préférences
+
+---
+
+## 💡 Conseils et Bonnes Pratiques {#conseils}
+
+### 🏆 Conseils pour une Utilisation Efficace
+
+#### Pour les Employés
+- ✅ **Vérifiez vos commandes** assignées quotidiennement
+- ✅ **Mettez à jour les statuts** rapidement après chaque action
+- ✅ **Contactez les clients** pour confirmer avant livraison
+- ✅ **Ajoutez des commentaires** pour les cas spéciaux
+- ✅ **Signalez les problèmes** à votre superviseur
+
+#### Pour les Superviseurs
+- ✅ **Distribuez les commandes** équitablement
+- ✅ **Surveillez les commandes en retard**
+- ✅ **Vérifiez la performance** de l'équipe régulièrement
+- ✅ **Aidez les employés** en difficulté
+- ✅ **Générez des rapports** hebdomadaires
+
+#### Pour les Administrateurs
+- ✅ **Importez les commandes** depuis Excel/Google Sheets
+- ✅ **Gérez les permissions** utilisateurs
+- ✅ **Surveillez les performances** globales
+- ✅ **Configurez les intégrations** nécessaires
+- ✅ **Sauvegardez les données** régulièrement
+
+---
+
+## ❓ FAQ - Questions Fréquentes {#faq}
+
+### 🔐 Connexion et Accès
+**Q: J'ai oublié mon mot de passe, que faire ?**
+R: Contactez votre administrateur système pour réinitialiser votre mot de passe.
+
+**Q: Pourquoi ne vois-je pas certaines fonctionnalités ?**
+R: Votre accès dépend de vos permissions. Contactez votre administrateur si vous avez besoin d'accès supplémentaires.
+
+### 📱 Interface et Navigation
+**Q: Le site fonctionne-t-il sur mobile ?**
+R: Oui ! Le système est entièrement adaptatif et fonctionne parfaitement sur téléphones et tablettes.
+
+**Q: Comment changer la langue ?**
+R: Cliquez sur l'icône 🌍 en haut à droite et sélectionnez votre langue préférée.
+
+### 🛒 Gestion des Commandes
+**Q: Comment modifier une commande déjà créée ?**
+R: Cliquez sur l'icône ✏️ à côté de la commande, modifiez les informations et sauvegardez.
+
+**Q: Qui peut voir mes commandes ?**
+R: Les employés voient uniquement leurs commandes assignées. Les superviseurs et administrateurs voient toutes les commandes.
+
+**Q: Comment signaler un problème avec une commande ?**
+R: Ajoutez un commentaire détaillé dans la commande et changez le statut approprié. Contactez votre superviseur si nécessaire.
+
+### 📊 Rapports et Statistiques
+**Q: À quelle fréquence les données se mettent-elles à jour ?**
+R: Les données se mettent à jour en temps réel. Vous pouvez aussi cliquer sur "Actualiser" pour forcer une mise à jour.
+
+**Q: Puis-je exporter les rapports ?**
+R: Oui, la plupart des rapports peuvent être exportés en format Excel.
+
+### 📦 Stock et Produits
+**Q: Comment ajouter un nouveau produit ?**
+R: Allez dans "Stock" → "Produits" → Cliquez sur "Ajouter un produit" (nécessite les permissions appropriées).
+
+**Q: Comment gérer les variantes de produits ?**
+R: Dans la fiche produit, vous pouvez ajouter des variantes (taille, couleur, etc.) avec des prix différents.
+
+*Guide créé pour le système Eco-S - Version 1.0*
+*Dernière mise à jour : Juillet 2025*
