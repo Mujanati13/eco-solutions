@@ -1,0 +1,237 @@
+.ecotrack-integration {
+  padding: 24px;
+  background: #f5f5f5;
+  min-height: 100vh;
+}
+
+.page-header {
+  background: white;
+  padding: 24px;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.page-header h2 {
+  margin-bottom: 8px;
+  color: #1890ff;
+}
+
+.form-card {
+  height: 100%;
+}
+
+.form-card .ant-card-body {
+  padding: 24px;
+}
+
+.results-card {
+  height: 100%;
+}
+
+.upload-card {
+  text-align: center;
+}
+
+.upload-card .ant-upload {
+  display: inline-block;
+  margin: 16px 0;
+}
+
+.tracking-card {
+  min-height: 400px;
+}
+
+.tracking-item {
+  margin-bottom: 24px;
+}
+
+.tracking-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.tracking-header .ant-typography {
+  font-size: 16px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 0;
+  color: #999;
+}
+
+.empty-state p {
+  margin-top: 16px;
+  font-size: 14px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .ecotrack-integration {
+    padding: 16px;
+  }
+  
+  .page-header {
+    padding: 16px;
+  }
+  
+  .form-card .ant-card-body {
+    padding: 16px;
+  }
+  
+  .tracking-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}
+
+/* Tab customization */
+.ant-tabs-nav {
+  margin-bottom: 24px;
+}
+
+.ant-tabs-tab {
+  padding: 12px 24px;
+  font-size: 16px;
+}
+
+.ant-tabs-tab-active {
+  background: #f0f7ff;
+  border-color: #1890ff;
+}
+
+/* Form styling */
+.ant-form-item-label > label {
+  font-weight: 500;
+  color: #262626;
+}
+
+.ant-input,
+.ant-select-selector,
+.ant-input-number {
+  border-radius: 6px;
+}
+
+.ant-btn-primary {
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
+}
+
+.ant-btn-primary:hover {
+  box-shadow: 0 4px 8px rgba(24, 144, 255, 0.3);
+}
+
+/* Table styling */
+.ant-table-thead > tr > th {
+  background: #fafafa;
+  border-bottom: 2px solid #e8e8e8;
+  font-weight: 600;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: #f0f7ff;
+}
+
+/* Status tags */
+.ant-tag {
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Steps styling */
+.ant-steps-item-title {
+  font-weight: 500;
+}
+
+.ant-steps-item-description {
+  color: #666;
+  font-size: 12px;
+}
+
+/* Alert styling */
+.ant-alert-info {
+  border: 1px solid #d6f7ff;
+  background: #f6ffed;
+}
+
+.ant-alert-info .ant-alert-message {
+  color: #1890ff;
+}
+
+/* Upload area */
+.ant-upload-btn {
+  border: 2px dashed #d9d9d9;
+  border-radius: 6px;
+  padding: 20px;
+  transition: all 0.3s ease;
+}
+
+.ant-upload-btn:hover {
+  border-color: #1890ff;
+  background: #f0f7ff;
+}
+
+/* Card hover effects */
+.ant-card {
+  transition: all 0.3s ease;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.ant-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* Loading states */
+.ant-spin-container {
+  position: relative;
+}
+
+.ant-spin-blur {
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Success animations */
+@keyframes successPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.ant-tag.ant-tag-success {
+  animation: successPulse 0.6s ease-in-out;
+}
+
+/* Error states */
+.ant-form-item-has-error .ant-input,
+.ant-form-item-has-error .ant-select-selector {
+  border-color: #ff4d4f;
+  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.2);
+}
+
+/* Custom scrollbar for tables */
+.ant-table-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.ant-table-body::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.ant-table-body::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+.ant-table-body::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
