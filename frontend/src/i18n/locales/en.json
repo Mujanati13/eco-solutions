@@ -9,6 +9,13 @@
     "tracking": "Tracking",
     
     "createOrder": "Create Order",
+        "selectProductSku": "Select product by SKU",
+    "autoStockDeduction": "Stock will be automatically deducted when delivered",
+    "stockAlreadyDeducted": "Stock was already deducted during order confirmation",
+    "reserved": "reserved"
+  },
+  "orders": {
+    "confirmedAndStockDeducted": "Order confirmed and stock deducted",
     "orderType": "Order Type",
     "orderTypeRequired": "Order type is required",
     "refClient": "Client Reference",
@@ -134,6 +141,8 @@
     "pagination": "Showing {{start}} to {{end}} of {{total}} entries"
   },
   "tracking": {
+    "employeeView": "Employee View - Assigned Orders",
+    "employeeViewDescription": "You are viewing only the orders assigned to you. To see all your orders, use the 'Order Management' section.",
     "viewDetails": "View Details",
     "viewEcotrackDetails": "View Order Details",
     "trackingId": "Tracking ID",
@@ -338,8 +347,21 @@
     "orders": "Orders",
     "sold": "Sold",
     "units": "Units",
+    "lowStockWarning": "Low stock warning",
+    "stockUpdated": "Stock updated",
+    "stockUpdateError": "Error updating stock",
+    "remaining": "remaining",
+    "deducted": "deducted",
+    "selectProductSku": "Select Product SKU",
+    "autoStockDeduction": "Stock will be automatically deducted when delivered",
     "orderDetails": "Order Details",
     "totalOrders": "Total Orders",
+    "myOrders": "My Orders",
+    "myPendingOrders": "My Pending Orders",
+    "myConfirmedOrders": "My Confirmed Orders",
+    "myDeliveredOrders": "My Delivered Orders",
+    "employeeView": "Employee View",
+    "employeeMessage": "You are viewing your assigned orders. Use 'Order Management' to handle your tasks.",
     "totalSold": "Total Sold",
     "totalRevenue": "Total Revenue",
     "recentOrders": "Recent Orders",
@@ -389,7 +411,26 @@
       "ordersSavedToDatabase": "{{count}} orders saved to local database",
       "databaseSaveWarning": "{{count}} orders failed to save to local database",
       "savedToDatabase": "Saved to Database ({{count}})",
-      "ecotrackOnly": "Ecotrack Only ({{count}})"
+      "ecotrackOnly": "Ecotrack Only ({{count}})",
+      "databaseOnlyInfo": "Orders will be imported and saved to the local database only. No Ecotrack deliveries will be created.",
+      "databaseImportTitle": "Import from Google Sheets",
+      "databaseImportDescription": "Import orders from Google Sheets with French format and save to local database",
+      "directImport": "Direct Import",
+      "directImportDescription": "Import orders directly from Google Sheets to local database",
+      "importNow": "Import Now",
+      "columnMappingTitle": "Expected Column Format (French Excel)",
+      "colA": "Reference Command",
+      "colB": "Customer Name (Required)",
+      "colC": "Phone (Required)",
+      "colD": "Phone 2",
+      "colE": "Delivery Address",
+      "colF": "Delivery City",
+      "colG": "Package Amount (Required)",
+      "colH": "Wilaya Code (Required)",
+      "colI": "Product",
+      "colJ": "Remarks",
+      "colK": "Weight (kg)",
+      "colL": "Metro Delivery"
     }
   }
 }

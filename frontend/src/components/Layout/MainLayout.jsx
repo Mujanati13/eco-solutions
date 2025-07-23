@@ -313,7 +313,7 @@ const MainLayout = () => {
             fontSize: collapsed ? '16px' : '20px',
             transition: 'all 0.2s'
           }}>
-            {collapsed ? 'ES' : 'Eco-S'}
+            {collapsed ? 'SPC' : 'Store Produit C'}
           </h2>
         </div>
         <Menu

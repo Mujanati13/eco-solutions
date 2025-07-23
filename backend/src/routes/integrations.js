@@ -312,70 +312,27 @@ router.get('/ecotrack/test', authenticateToken, requirePermission('canManageGoog
 router.post('/google-sheets/import', authenticateToken, requirePermission('canImportFromGoogleSheets'), async (req, res) => {
   try {
     const { sheetRange } = req.body;
+    const userId = req.user.id;
     
     // Import orders from Google Sheets
-    const orders = await googleSheetsService.importOrdersFromSheet(sheetRange);
+    const result = await googleSheetsService.importOrdersFromSheet(googleSheetsService.spreadsheetId, sheetRange, userId);
     
-    if (orders.length === 0) {
+    if (!result.success || result.imported === 0) {
       return res.json({
-        message: 'No orders found in the specified range',
-        count: 0,
-        imported: 0
+        message: result.message || 'No orders found in the specified range',
+        count: result.total || 0,
+        imported: result.imported || 0,
+        errors: result.errors || []
       });
     }
 
-    let importedCount = 0;
-    const errors = [];
-
-    // Insert orders into database
-    for (const order of orders) {
-      try {
-        // Check if order already exists
-        const [existing] = await pool.query(
-          'SELECT id FROM orders WHERE order_number = ?',
-          [order.order_number]
-        );
-
-        if (existing.length > 0) {
-          errors.push(`Order ${order.order_number} already exists`);
-          continue;
-        }
-
-        // Insert new order
-        await pool.query(`
-          INSERT INTO orders (
-            order_number, customer_name, customer_phone, customer_address, 
-            customer_city, product_details, total_amount, status, 
-            payment_status, created_at, delivery_date, notes, created_by
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          order.order_number,
-          order.customer_name,
-          order.customer_phone,
-          order.customer_address,
-          order.customer_city,
-          JSON.stringify(order.product_details),
-          order.total_amount,
-          order.status,
-          order.payment_status,
-          order.created_at,
-          order.delivery_date,
-          order.notes,
-          req.user.id
-        ]);
-
-        importedCount++;
-      } catch (error) {
-        console.error(`Error importing order ${order.order_number}:`, error);
-        errors.push(`Failed to import order ${order.order_number}: ${error.message}`);
-      }
-    }
-
+    // Return the import result directly
     res.json({
-      message: `Imported ${importedCount} orders from Google Sheets`,
-      count: orders.length,
-      imported: importedCount,
-      errors: errors.length > 0 ? errors : undefined
+      message: result.message,
+      count: result.total,
+      imported: result.imported,
+      errors: result.errors,
+      importedOrders: result.importedOrders
     });
   } catch (error) {
     console.error('Google Sheets import error:', error);
@@ -399,16 +356,19 @@ router.post('/google-sheets/import-to-ecotrack', authenticateToken, requirePermi
     }
     
     // Import orders from Google Sheets using user's authentication
-    const orders = await googleSheetsService.importOrdersFromSheet(sheetRange, userId);
+    const result = await googleSheetsService.importOrdersFromSheet(googleSheetsService.spreadsheetId, sheetRange, userId);
     
-    if (orders.length === 0) {
+    if (!result.success || result.imported === 0) {
       return res.json({
-        message: 'No orders found in the specified range',
-        count: 0,
+        message: result.message || 'No orders found in the specified range',
+        count: result.total || 0,
         imported: 0,
         ecotrackDeliveries: 0
       });
     }
+
+    // Get the actual orders array from the result
+    const orders = result.importedOrders || [];
 
     // If validation only, return the orders without importing
     if (validateOnly) {
@@ -420,139 +380,29 @@ router.post('/google-sheets/import-to-ecotrack', authenticateToken, requirePermi
       });
     }
 
-    let importedCount = 0;
-    let ecotrackCount = 0;
-    let databaseSaved = 0;
-    let databaseFailed = 0;
-    const errors = [];
+    // Since orders are already imported to database by importOrdersFromSheet,
+    // we just need to return the results without additional processing
+    const errors = result.errors || [];
     const warnings = [];
-
-    // Process orders one by one
-    for (const [index, orderData] of orders.entries()) {
-      try {
-        // Check if order already exists
-        const [existing] = await pool.query(
-          'SELECT id, tracking_number FROM orders WHERE order_number = ?',
-          [orderData.order_number]
-        );
-
-        if (existing.length > 0 && skipDuplicates) {
-          warnings.push(`Order ${orderData.order_number} already exists (skipped)`);
-          continue;
-        }
-
-        let trackingNumber = null;
-        let ecotrackResult = null;
-
-        // Create Ecotrack delivery first if requested
-        if (createEcotrackDeliveries) {
-          try {
-            await ecotrackService.initialize();
-            ecotrackResult = await ecotrackService.createDelivery(orderData);
-            
-            if (ecotrackResult && ecotrackResult.tracking_id) {
-              trackingNumber = ecotrackResult.tracking_id;
-              ecotrackCount++;
-            } else {
-              warnings.push(`Order ${orderData.order_number}: Failed to create Ecotrack delivery, but order will be imported`);
-            }
-          } catch (ecotrackError) {
-            console.error(`Ecotrack error for order ${orderData.order_number}:`, ecotrackError);
-            warnings.push(`Order ${orderData.order_number}: Ecotrack delivery creation failed - ${ecotrackError.message}`);
-          }
-        }
-
-        // Insert or update order in database if requested
-        if (saveToDatabase) {
-          try {
-            if (existing.length > 0) {
-              // Update existing order
-              await pool.query(`
-                UPDATE orders SET 
-                  customer_name = ?, customer_phone = ?, customer_address = ?, 
-                  customer_city = ?, product_details = ?, total_amount = ?, 
-                  status = ?, payment_status = ?, delivery_date = ?, notes = ?,
-                  tracking_number = COALESCE(?, tracking_number),
-                  ecotrack_synced = ?,
-                  updated_at = NOW(),
-                  updated_by = ?
-                WHERE order_number = ?
-              `, [
-                orderData.customer_name,
-                orderData.customer_phone,
-                orderData.customer_address,
-                orderData.customer_city,
-                JSON.stringify(orderData.product_details),
-                orderData.total_amount,
-                orderData.status,
-                orderData.payment_status,
-                orderData.delivery_date,
-                orderData.notes,
-                trackingNumber,
-                ecotrackResult ? true : false,
-                userId,
-                orderData.order_number
-              ]);
-            } else {
-              // Insert new order
-              await pool.query(`
-                INSERT INTO orders (
-                  order_number, customer_name, customer_phone, customer_address, 
-                  customer_city, product_details, total_amount, status, 
-                  payment_status, created_at, delivery_date, notes, 
-                  tracking_number, ecotrack_synced, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              `, [
-                orderData.order_number,
-                orderData.customer_name,
-                orderData.customer_phone,
-                orderData.customer_address,
-                orderData.customer_city,
-                JSON.stringify(orderData.product_details),
-                orderData.total_amount,
-                orderData.status || 'pending',
-                orderData.payment_status || 'pending',
-                orderData.created_at || new Date(),
-                orderData.delivery_date,
-                orderData.notes,
-                trackingNumber,
-                ecotrackResult ? true : false,
-                userId
-              ]);
-            }
-            databaseSaved++;
-          } catch (dbError) {
-            console.error(`Database save error for order ${orderData.order_number}:`, dbError);
-            databaseFailed++;
-            warnings.push(`Order ${orderData.order_number}: Saved to Ecotrack but failed to save to local database - ${dbError.message}`);
-          }
-        }
-
-        importedCount++;
-      } catch (error) {
-        console.error(`Error processing order ${orderData.order_number}:`, error);
-        errors.push(`Failed to process order ${orderData.order_number}: ${error.message}`);
-      }
-    }
 
     // Return comprehensive results
     res.json({
-      message: `Processed ${importedCount} orders from Google Sheets${createEcotrackDeliveries ? ` with ${ecotrackCount} Ecotrack deliveries created` : ''}`,
-      count: orders.length,
-      imported: importedCount,
-      ecotrackDeliveries: ecotrackCount,
-      databaseSaved,
-      databaseFailed,
-      errors: errors.length > 0 ? errors.slice(0, 10) : [], // Limit errors shown
-      warnings: warnings.length > 0 ? warnings.slice(0, 10) : [], // Limit warnings shown
+      message: `Successfully imported ${result.imported} orders from Google Sheets to database`,
+      count: result.total,
+      imported: result.imported,
+      ecotrackDeliveries: 0, // No Ecotrack deliveries created
+      databaseSaved: result.imported,
+      databaseFailed: 0,
+      errors: errors.length > 0 ? errors.slice(0, 10) : [],
+      warnings: warnings.length > 0 ? warnings.slice(0, 10) : [],
       totalErrors: errors.length,
       totalWarnings: warnings.length,
-      success: importedCount > 0
+      success: result.imported > 0
     });
   } catch (error) {
-    console.error('Google Sheets to Ecotrack import error:', error);
+    console.error('Google Sheets import error:', error);
     res.status(500).json({ 
-      error: 'Failed to import orders from Google Sheets to Ecotrack',
+      error: 'Failed to import orders from Google Sheets',
       details: error.message 
     });
   }

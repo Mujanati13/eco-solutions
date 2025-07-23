@@ -289,17 +289,27 @@ router.post('/import-orders', authenticateToken, async (req, res) => {
       });
     }
     
-    const result = await googleSheetsService.importOrdersFromSheet(
-      userId, 
-      spreadsheetId, 
-      sheetName, 
-      range
-    );
+    // Construct the sheet range - if specific range provided, use it, otherwise use sheetName
+    const sheetRange = range || sheetName;
+    
+    const result = await googleSheetsService.importOrdersFromSheet(spreadsheetId, sheetRange, userId);
+    
+    if (!result.success) {
+      return res.json({
+        success: false,
+        message: result.message || 'No orders found in the specified range',
+        count: result.total || 0,
+        imported: result.imported || 0,
+        errors: result.errors || []
+      });
+    }
     
     res.json({
       success: true,
-      ...result,
-      message: 'Orders imported successfully'
+      message: `Successfully imported ${result.imported} orders from Google Sheets to database`,
+      count: result.total,
+      imported: result.imported,
+      errors: result.errors || []
     });
   } catch (error) {
     console.error('Error importing orders:', error);

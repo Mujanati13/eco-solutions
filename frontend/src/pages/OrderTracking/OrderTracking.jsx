@@ -68,6 +68,8 @@ const OrderTracking = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const isSupervisor = user?.role === "supervisor" || isAdmin;
+  const canViewAllOrders = isAdmin || isSupervisor;
 
   useEffect(() => {
     fetchOrders();
@@ -82,6 +84,12 @@ const OrderTracking = () => {
         customer_name: searchText,
         status: statusFilter,
       };
+
+      // Role-based filtering for employees
+      if (!canViewAllOrders && user?.id) {
+        // Employees only see their assigned orders
+        params.assigned_to = user.id;
+      }
 
       const response = await orderService.getOrders(params);
       setOrders(response.orders || []);
@@ -191,7 +199,7 @@ const OrderTracking = () => {
     try {
       setBulkSyncLoading(true);
       
-      // Get all orders with tracking IDs
+      // Get all orders with tracking IDs (filtered by user's visibility)
       const ordersWithTracking = orders.filter(order => order.ecotrack_tracking_id);
       
       if (ordersWithTracking.length === 0) {
@@ -708,7 +716,7 @@ const OrderTracking = () => {
           marginBottom: 24,
         }}
       >
-        {isAdmin && (
+        {canViewAllOrders && (
           <Button
             type="primary"
             loading={bulkSyncLoading}
@@ -721,6 +729,15 @@ const OrderTracking = () => {
       </div>
       {/* Filters */}
       <Card style={{ marginBottom: 16 }}>
+        {!canViewAllOrders && (
+          <Alert
+            message={t("tracking.employeeView")}
+            description={t("tracking.employeeViewDescription")}
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        )}
         <Row gutter={16}>
           <Col xs={24} sm={12} md={8}>
             <Input

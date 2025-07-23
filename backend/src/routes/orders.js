@@ -702,18 +702,41 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
     // Integrate with Ecotrack when order is confirmed
     if (updates.status === 'confirmed' && order.status !== 'confirmed') {
       try {
+        console.log(`🚚 Status changed from '${order.status}' to 'confirmed' for order ${order.order_number || order.id}`);
         console.log(`🚚 Creating Ecotrack shipment for order ${order.order_number}`);
         
-        const trackingResult = await ecotrackService.createShipment({
+        // Parse product details to extract more information
+        let productInfo = {};
+        if (order.product_details) {
+          try {
+            productInfo = typeof order.product_details === 'string' 
+              ? JSON.parse(order.product_details) 
+              : order.product_details;
+            console.log(`📦 Parsed product info:`, productInfo);
+          } catch (e) {
+            console.log(`⚠️ Failed to parse product_details, using fallback:`, e.message);
+            productInfo = { name: order.product_details };
+          }
+        } else {
+          console.log(`⚠️ No product_details found for order ${order.order_number}`);
+        }
+        
+        const shipmentData = {
           order_number: order.order_number,
           customer_name: order.customer_name,
           customer_phone: order.customer_phone,
+          customer_email: order.customer_email || '', // Add email if available
           customer_address: order.customer_address,
           customer_city: order.customer_city,
-          product_details: order.product_details,
+          product_details: productInfo,
           total_amount: order.total_amount,
-          notes: order.notes
-        });
+          notes: order.notes || '',
+          delivery_type: order.delivery_type || 'home'
+        };
+        
+        console.log(`📦 Ecotrack shipment data:`, shipmentData);
+        const trackingResult = await ecotrackService.createShipment(shipmentData);
+        console.log(`📦 Ecotrack response:`, trackingResult);
 
         if (trackingResult.success) {
           // Update order with Ecotrack tracking information
@@ -1596,6 +1619,45 @@ router.post('/:id/recalculate-delivery', authenticateToken, async (req, res) => 
     res.status(500).json({
       success: false,
       message: 'Internal server error'
+    });
+  }
+});
+
+// Test Ecotrack integration
+router.post('/test-ecotrack', authenticateToken, requirePermission('canEditOrders'), async (req, res) => {
+  try {
+    const testOrderData = {
+      order_number: `TEST-${Date.now()}`,
+      customer_name: 'Test Customer',
+      customer_phone: '0555123456',
+      customer_email: 'test@example.com',
+      customer_address: 'Test Address',
+      customer_city: 'Algiers',
+      product_details: {
+        name: 'Test Product',
+        sku: 'TEST-SKU-001',
+        quantity: 1,
+        is_fragile: 0
+      },
+      total_amount: 2500,
+      notes: 'Test order for Ecotrack integration',
+      delivery_type: 'home'
+    };
+
+    console.log('🧪 Testing Ecotrack integration...');
+    const result = await ecotrackService.createShipment(testOrderData);
+
+    res.json({
+      success: true,
+      message: 'Ecotrack test successful',
+      data: result
+    });
+  } catch (error) {
+    console.error('Ecotrack test error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Ecotrack test failed',
+      error: error.message
     });
   }
 });

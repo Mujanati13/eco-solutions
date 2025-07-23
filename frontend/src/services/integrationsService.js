@@ -34,6 +34,16 @@ export const integrationsService = {
     }
   },
 
+  async getGoogleSheetsList() {
+    try {
+      const response = await api.get('/api/integrations/google-sheets/files');
+      return response.data;
+    } catch (error) {
+      console.error('Get Google Sheets files list error:', error);
+      throw error;
+    }
+  },
+
   async testGoogleSheetsConnection() {
     try {
       const response = await api.get('/api/integrations/google-sheets/test');

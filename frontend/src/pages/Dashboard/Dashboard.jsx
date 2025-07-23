@@ -127,6 +127,7 @@ const Dashboard = React.memo(() => {
       // Handle stats response
       if (statsResponse.ok) {
         const statsData = await statsResponse.json()
+        console.log('📊 Dashboard stats received:', statsData)
         setStats(statsData || {})
       } else {
         console.error('Stats fetch failed:', statsResponse.error)
@@ -568,15 +569,22 @@ const Dashboard = React.memo(() => {
   }
 
   // Order Management Tab Content
-  const OrderManagementContent = () => (
+  const OrderManagementContent = () => {
+    console.log('🔍 Dashboard permissions:', { 
+      hasViewAllOrders: hasPermission('canViewAllOrders'),
+      user: user?.role,
+      userRoles: user?.roles 
+    })
+    
+    return (
     <div>
       {/* Order Statistics Cards */}
       <Row gutter={[16, 16]} className="dashboard-stats" style={{ marginBottom: 24 }}>
         <Col xs={24} sm={12} md={12} lg={6} xl={6}>
           <Card className="dashboard-card" style={{ borderTop: '4px solid #1890ff' }}>
             <Statistic
-              title={(isAdmin || isSupervisor) && !hasRole('employee') && !hasRole('custom') ? t('dashboard.totalOrders') : t('dashboard.myOrders')}
-              value={(isAdmin || isSupervisor) && !hasRole('employee') && !hasRole('custom') ? (stats.totalOrders || stats.total_orders || 0) : (stats.my_orders || 0)}
+              title={hasPermission('canViewAllOrders') ? t('dashboard.totalOrders') : t('dashboard.myOrders')}
+              value={hasPermission('canViewAllOrders') ? (stats.totalOrders || stats.total_orders || 0) : (stats.my_orders || 0)}
               prefix={<ShoppingCartOutlined />}
               valueStyle={{ color: '#1890ff', fontSize: '1.5em', fontWeight: 'bold' }}
             />
@@ -585,8 +593,8 @@ const Dashboard = React.memo(() => {
         <Col xs={24} sm={12} md={12} lg={6} xl={6}>
           <Card className="dashboard-card" style={{ borderTop: '4px solid #fa8c16' }}>
             <Statistic
-              title={(isAdmin || isSupervisor) && !hasRole('employee') && !hasRole('custom') ? t('dashboard.pendingOrders') : t('dashboard.myPendingOrders')}
-              value={(isAdmin || isSupervisor) && !hasRole('employee') && !hasRole('custom') ? (stats.pendingOrders || stats.pending_orders || 0) : (stats.my_pending_orders || 0)}
+              title={hasPermission('canViewAllOrders') ? t('dashboard.pendingOrders') : t('dashboard.myPendingOrders')}
+              value={hasPermission('canViewAllOrders') ? (stats.pendingOrders || stats.pending_orders || 0) : (stats.my_pending_orders || 0)}
               prefix={<ClockCircleOutlined />}
               valueStyle={{ color: '#fa8c16', fontSize: '1.5em', fontWeight: 'bold' }}
             />
@@ -595,8 +603,8 @@ const Dashboard = React.memo(() => {
         <Col xs={24} sm={12} md={12} lg={6} xl={6}>
           <Card className="dashboard-card" style={{ borderTop: '4px solid #52c41a' }}>
             <Statistic
-              title={(isAdmin || isSupervisor) && !hasRole('employee') && !hasRole('custom') ? t('dashboard.confirmedOrders') : t('dashboard.myConfirmedOrders')}
-              value={(isAdmin || isSupervisor) && !hasRole('employee') && !hasRole('custom') ? (stats.confirmedOrders || stats.confirmed_orders || 0) : (stats.my_confirmed_orders || 0)}
+              title={hasPermission('canViewAllOrders') ? t('dashboard.confirmedOrders') : t('dashboard.myConfirmedOrders')}
+              value={hasPermission('canViewAllOrders') ? (stats.confirmedOrders || stats.confirmed_orders || 0) : (stats.my_confirmed_orders || 0)}
               prefix={<CheckCircleOutlined />}
               valueStyle={{ color: '#52c41a', fontSize: '1.5em', fontWeight: 'bold' }}
             />
@@ -605,8 +613,8 @@ const Dashboard = React.memo(() => {
         <Col xs={24} sm={12} md={12} lg={6} xl={6}>
           <Card className="dashboard-card" style={{ borderTop: '4px solid #722ed1' }}>
             <Statistic
-              title={(isAdmin || isSupervisor) && !hasRole('employee') && !hasRole('custom') ? t('dashboard.deliveredOrders') : t('dashboard.myDeliveredOrders')}
-              value={(isAdmin || isSupervisor) && !hasRole('employee') && !hasRole('custom') ? (stats.deliveredOrders || stats.delivered_orders || 0) : (stats.my_delivered_orders || 0)}
+              title={hasPermission('canViewAllOrders') ? t('dashboard.deliveredOrders') : t('dashboard.myDeliveredOrders')}
+              value={hasPermission('canViewAllOrders') ? (stats.deliveredOrders || stats.delivered_orders || 0) : (stats.my_delivered_orders || 0)}
               prefix={<DeliveredProcedureOutlined />}
               valueStyle={{ color: '#722ed1', fontSize: '1.5em', fontWeight: 'bold' }}
             />
@@ -614,95 +622,118 @@ const Dashboard = React.memo(() => {
         </Col>
       </Row>
 
-      {/* Time Range Selector */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col span={24}>
-          <Card className="dashboard-card">
-            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-              <Title level={4} style={{ margin: 0, color: '#1890ff' }}>
-                {t('dashboard.analyticsTitle')}
-              </Title>
-              <Space>
-                <Button 
-                  type="primary" 
-                  icon={<ReloadOutlined />}
-                  onClick={handleManualRefresh}
-                  loading={chartsLoading || loading}
-                  size="small"
-                  style={{ backgroundColor: '#1890ff', borderColor: '#1890ff' }}
-                >
-                  {t('common.refresh') || 'Refresh'}
-                </Button>
-                <Select
-                  value={timeRange}
-                  onChange={setTimeRange}
-                  style={{ width: 200 }}
-                  disabled={chartsLoading || loading}
-                >
-                  <Option value={7}>{t('dashboard.last7Days')}</Option>
-                  <Option value={30}>{t('dashboard.last30Days')}</Option>
-                  <Option value={90}>{t('dashboard.last90Days')}</Option>
-                  <Option value={365}>{t('dashboard.lastYear')}</Option>
-                </Select>
+      {/* Employee Message - Only shown to employees */}
+      {!hasPermission('canViewAllOrders') && (
+        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+          <Col span={24}>
+            <Card className="dashboard-card" style={{ borderLeft: '4px solid #1890ff' }}>
+              <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                <UserOutlined style={{ fontSize: '24px', color: '#1890ff', marginBottom: '12px' }} />
+                <Title level={4} style={{ color: '#1890ff', margin: '0 0 8px 0' }}>
+                  {t('dashboard.employeeView')}
+                </Title>
+                <p style={{ color: '#666', margin: 0 }}>
+                  {t('dashboard.employeeMessage')}
+                </p>
+              </div>
+            </Card>
+          </Col>
+        </Row>
+      )}
+
+      {/* Time Range Selector - Only for admin users */}
+      {hasPermission('canViewAllOrders') && (
+        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+          <Col span={24}>
+            <Card className="dashboard-card">
+              <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                <Title level={4} style={{ margin: 0, color: '#1890ff' }}>
+                  {t('dashboard.analyticsTitle')}
+                </Title>
+                <Space>
+                  <Button 
+                    type="primary" 
+                    icon={<ReloadOutlined />}
+                    onClick={handleManualRefresh}
+                    loading={chartsLoading || loading}
+                    size="small"
+                    style={{ backgroundColor: '#1890ff', borderColor: '#1890ff' }}
+                  >
+                    {t('common.refresh') || 'Refresh'}
+                  </Button>
+                  <Select
+                    value={timeRange}
+                    onChange={setTimeRange}
+                    style={{ width: 200 }}
+                    disabled={chartsLoading || loading}
+                  >
+                    <Option value={7}>{t('dashboard.last7Days')}</Option>
+                    <Option value={30}>{t('dashboard.last30Days')}</Option>
+                    <Option value={90}>{t('dashboard.last90Days')}</Option>
+                    <Option value={365}>{t('dashboard.lastYear')}</Option>
+                  </Select>
+                </Space>
               </Space>
-            </Space>
-          </Card>
-        </Col>
-      </Row>
+            </Card>
+          </Col>
+        </Row>
+      )}
   
-      {/* Charts Section */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        {/* Order Distribution Chart */}
-        <Col xs={24} md={12}>
-          <Card 
-            title={
-              <Space>
-                <BarChartOutlined style={{ color: '#1890ff' }} />
-                <span style={{ color: '#1890ff' }}>{t('dashboard.orderDistribution')}</span>
-              </Space>
-            }
-            className="dashboard-card"
-          >
-            {orderDistribution && orderDistribution.length > 0 ? (
-              <ReactECharts 
-                option={getStatusChartOption()} 
-                style={{ height: '350px' }}
-              />
-            ) : (
-              <div style={{ textAlign: 'center', padding: '50px 0', color: '#999' }}>
-                {t('common.noData')}
-              </div>
-            )}
-          </Card>
-        </Col>
+      {/* Charts Section - Only for admin users */}
+      {hasPermission('canViewAllOrders') && (
+        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+          {/* Order Distribution Chart */}
+          <Col xs={24} md={12}>
+            <Card 
+              title={
+                <Space>
+                  <BarChartOutlined style={{ color: '#1890ff' }} />
+                  <span style={{ color: '#1890ff' }}>{t('dashboard.orderDistribution')}</span>
+                </Space>
+              }
+              className="dashboard-card"
+            >
+              {orderDistribution && orderDistribution.length > 0 ? (
+                <ReactECharts 
+                  option={getStatusChartOption()} 
+                  style={{ height: '350px' }}
+                />
+              ) : (
+                <div style={{ textAlign: 'center', padding: '50px 0', color: '#999' }}>
+                  {t('common.noData')}
+                </div>
+              )}
+            </Card>
+          </Col>
 
-        {/* Order Trends Chart */}
-        <Col xs={24} md={12}>
-          <Card 
-            title={
-              <Space>
-                <LineChartOutlined style={{ color: '#1890ff' }} />
-                <span style={{ color: '#1890ff' }}>{t('dashboard.orderTrends')}</span>
-              </Space>
-            }
-            className="dashboard-card"
-          >
-            {orderTrends && orderTrends.length > 0 ? (
-              <ReactECharts 
-                option={getTrendsChartOption()} 
-                style={{ height: '350px' }}
-              />
-            ) : (
-              <div style={{ textAlign: 'center', padding: '50px 0', color: '#999' }}>
-                {t('common.noData')}
-              </div>
-            )}
-          </Card>
-        </Col>
-      </Row>
+          {/* Order Trends Chart */}
+          <Col xs={24} md={12}>
+            <Card 
+              title={
+                <Space>
+                  <LineChartOutlined style={{ color: '#1890ff' }} />
+                  <span style={{ color: '#1890ff' }}>{t('dashboard.orderTrends')}</span>
+                </Space>
+              }
+              className="dashboard-card"
+            >
+              {orderTrends && orderTrends.length > 0 ? (
+                <ReactECharts 
+                  option={getTrendsChartOption()} 
+                  style={{ height: '350px' }}
+                />
+              ) : (
+                <div style={{ textAlign: 'center', padding: '50px 0', color: '#999' }}>
+                  {t('common.noData')}
+                </div>
+              )}
+            </Card>
+          </Col>
+        </Row>
+      )}
 
-      {/* Revenue and Performance Charts - Only for Admin/Supervisor, hidden for Employee and Custom users */}
-      {(isAdmin || isSupervisor) && !hasRole('employee') && !hasRole('custom') && (
+      {/* Revenue and Performance Charts - Only for users with admin permissions */}
+      {hasPermission('canViewAllOrders') && (
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           {/* Revenue Trends */}
           <Col xs={24} md={12}>
@@ -754,26 +785,29 @@ const Dashboard = React.memo(() => {
         </Row>
       )}
 
-      {/* Recent Orders Table */}
-      <Card 
-        title={<span style={{ color: '#1890ff' }}>{t('dashboard.recentOrders')}</span>}
-        className="dashboard-card"
-        hoverable
-      >
-        <Table
-          columns={columns}
-          dataSource={recentOrders}
-          rowKey="id"
-          pagination={false}
-          size="small"
-          scroll={{ x: 'max-content' }}
-          locale={{
-            emptyText: t('common.noData')
-          }}
-        />
-      </Card>
+      {/* Recent Orders Table - Only for users with admin permissions */}
+      {hasPermission('canViewAllOrders') && (
+        <Card 
+          title={<span style={{ color: '#1890ff' }}>{t('dashboard.recentOrders')}</span>}
+          className="dashboard-card"
+          hoverable
+        >
+          <Table
+            columns={columns}
+            dataSource={recentOrders}
+            rowKey="id"
+            pagination={false}
+            size="small"
+            scroll={{ x: 'max-content' }}
+            locale={{
+              emptyText: t('common.noData')
+            }}
+          />
+        </Card>
+      )}
     </div>
-  )
+    )
+  }
 
   const tabItems = [
     {

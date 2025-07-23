@@ -50,6 +50,7 @@ import {
 import { orderService } from "../../services/orderService";
 import { userService } from "../../services/userService";
 import orderProductService from "../../services/orderProductService";
+import stockService from "../../services/stockService";
 import { useAuth } from "../../contexts/AuthContext";
 import "./OrderManagement.css";
 
@@ -101,6 +102,12 @@ const OrderManagement = () => {
   const [loadingWilayas, setLoadingWilayas] = useState(false);
   const [loadingBaladias, setLoadingBaladias] = useState(false);
   const [loadingDeliveryPrice, setLoadingDeliveryPrice] = useState(false);
+
+  // Product and stock tracking state
+  const [products, setProducts] = useState([]);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [productStock, setProductStock] = useState(null);
+  const [loadingProducts, setLoadingProducts] = useState(false);
 
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -210,9 +217,12 @@ const OrderManagement = () => {
   const fetchBaladias = async (wilayaId) => {
     try {
       setLoadingBaladias(true);
+      console.log('Fetching baladias for wilaya:', wilayaId);
       const response = await orderService.getBaladiasByWilaya(wilayaId);
+      console.log('Baladias response:', response);
       if (response.success) {
         setBaladias(response.data);
+        console.log('Set baladias:', response.data.length, 'items');
       }
     } catch (error) {
       console.error("Error fetching baladias:", error);
@@ -224,8 +234,15 @@ const OrderManagement = () => {
 
   const handleWilayaChange = (wilayaId) => {
     setSelectedWilaya(wilayaId);
+    
+    // Clear current baladia selection and list
+    setBaladias([]);
+    form.setFieldsValue({ baladia_id: undefined });
 
     if (wilayaId) {
+      // Fetch baladias for the selected wilaya
+      fetchBaladias(wilayaId);
+      
       // Delay calculation to allow form to update first
       setTimeout(() => {
         calculateDeliveryPrice();
@@ -233,15 +250,10 @@ const OrderManagement = () => {
     }
   };
 
-  const handlePricingLevelChange = (level) => {
-    setPricingLevel(level);
-    calculateDeliveryPrice();
-  };
-
   const calculateDeliveryPrice = async () => {
     try {
       const formValues = form.getFieldsValue();
-      const { wilaya_id, delivery_type, weight, volume, pricing_level } =
+      const { wilaya_id, baladia_id, delivery_type, weight, volume } =
         formValues;
 
       if (!wilaya_id) return;
@@ -253,8 +265,13 @@ const OrderManagement = () => {
         delivery_type: delivery_type || "domicile",
         weight: weight || 1,
         volume: volume || 1,
-        pricing_level: pricing_level || pricingLevel,
+        pricing_level: baladia_id ? "baladia" : "wilaya", // Auto-determine based on baladia selection
       };
+
+      // Include baladia_id if available
+      if (baladia_id) {
+        pricingData.baladia_id = baladia_id;
+      }
 
       const response = await orderService.calculateDeliveryPrice(pricingData);
 
@@ -282,7 +299,56 @@ const OrderManagement = () => {
   // Load wilayas when component mounts
   useEffect(() => {
     fetchWilayas();
+    fetchProducts();
   }, []);
+
+  const fetchProducts = async () => {
+    try {
+      setLoadingProducts(true);
+      const response = await stockService.getProducts();
+      setProducts(response.products || []);
+    } catch (error) {
+      console.error("Error fetching products:", error);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const handleProductSelection = async (productSku) => {
+    if (!productSku) {
+      setSelectedProduct(null);
+      setProductStock(null);
+      return;
+    }
+
+    try {
+      // Find product by SKU
+      const product = products.find(p => p.sku === productSku);
+      if (product) {
+        setSelectedProduct(product);
+        setProductStock(product.current_stock);
+        
+        // Auto-fill product information
+        form.setFieldsValue({
+          product_info: {
+            ...form.getFieldValue('product_info'),
+            name: product.name,
+            unit_price: product.selling_price,
+            category: product.category_name || ''
+          }
+        });
+        
+        // Show stock warning if low
+        if (product.current_stock <= 5) {
+          message.warning(
+            `${t("stock.lowStockWarning")}: ${product.current_stock} ${t("stock.units")} ${t("stock.remaining")}`
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Error handling product selection:", error);
+    }
+  };
 
   const handleCreateOrder = async (values) => {
     try {
@@ -291,11 +357,15 @@ const OrderManagement = () => {
       const deliveryPrice = parseFloat(values.delivery_price || 0);
       const finalTotal = totalAmount + deliveryPrice;
 
-      // Add final total to the values
+      // Transform product_info to product_details JSON string
       const orderData = {
         ...values,
         final_total: finalTotal,
+        product_details: values.product_info ? JSON.stringify(values.product_info) : "",
       };
+
+      // Remove the nested product_info since we've converted it to product_details
+      delete orderData.product_info;
 
       await orderService.createOrder(orderData);
       message.success(t("orders.createSuccess"));
@@ -315,11 +385,15 @@ const OrderManagement = () => {
       const deliveryPrice = parseFloat(values.delivery_price || 0);
       const finalTotal = totalAmount + deliveryPrice;
 
-      // Add final total to the values
+      // Transform product_info to product_details JSON string
       const orderData = {
         ...values,
         final_total: finalTotal,
+        product_details: values.product_info ? JSON.stringify(values.product_info) : "",
       };
+
+      // Remove the nested product_info since we've converted it to product_details
+      delete orderData.product_info;
 
       await orderService.updateOrder(editingOrder.id, orderData);
       message.success(t("orders.updateSuccess"));
@@ -362,9 +436,117 @@ const OrderManagement = () => {
 
   const handleStatusChange = async (orderId, newStatus) => {
     try {
-      await orderService.updateOrder(orderId, { status: newStatus });
-      message.success(t("orders.statusUpdateSuccess"));
-      fetchOrders();
+      console.log(`🔄 Status change initiated: Order ${orderId} -> ${newStatus}`);
+      const response = await orderService.updateOrder(orderId, { status: newStatus });
+      console.log(`✅ Status change response:`, response);
+      
+      // Handle stock deduction for delivered orders
+      if (newStatus === 'delivered') {
+        const order = orders.find(o => o.id === orderId);
+        if (order && order.product_details) {
+          try {
+            const productDetails = typeof order.product_details === 'string' 
+              ? JSON.parse(order.product_details) 
+              : order.product_details;
+            
+            if (productDetails.sku && productDetails.quantity) {
+              // Find the product by SKU
+              const product = products.find(p => p.sku === productDetails.sku);
+              if (product) {
+                const quantityToDeduct = parseInt(productDetails.quantity) || 1;
+                
+                // Check if stock was already deducted (when order was confirmed)
+                // We'll check if the order was previously in a "processing" state
+                // If it was already confirmed/processing, stock might have been deducted
+                const wasAlreadyProcessed = order.status === 'confirmed' || 
+                                          order.status === 'processing' || 
+                                          order.status === 'out_for_delivery';
+                
+                if (!wasAlreadyProcessed) {
+                  const newStock = Math.max(0, product.current_stock - quantityToDeduct);
+                  
+                  // Update product stock
+                  await stockService.updateProduct(product.id, {
+                    current_stock: newStock
+                  });
+                  
+                  message.success(
+                    `${t("orders.statusUpdateSuccess")} - ${t("stock.stockUpdated")}: ${product.name} (${quantityToDeduct} ${t("stock.units")} ${t("stock.deducted")})`
+                  );
+                  
+                  // Refresh products list
+                  fetchProducts();
+                } else {
+                  // Stock was already deducted during confirmation/processing
+                  message.success(
+                    `${t("orders.statusUpdateSuccess")} - ${t("stock.stockAlreadyDeducted")}`
+                  );
+                }
+              }
+            }
+          } catch (error) {
+            console.error("Error updating stock:", error);
+            message.warning(t("stock.stockUpdateError"));
+          }
+        }
+      } 
+      // Handle stock deduction for confirmed orders (when they enter processing pipeline)
+      else if (newStatus === 'confirmed') {
+        console.log(`📦 Processing confirmed status for order ${orderId}`);
+        const order = orders.find(o => o.id === orderId);
+        console.log(`📋 Found order:`, order);
+        
+        if (order && order.product_details) {
+          try {
+            const productDetails = typeof order.product_details === 'string' 
+              ? JSON.parse(order.product_details) 
+              : order.product_details;
+            
+            if (productDetails.sku && productDetails.quantity) {
+              // Find the product by SKU
+              const product = products.find(p => p.sku === productDetails.sku);
+              if (product) {
+                const quantityToDeduct = parseInt(productDetails.quantity) || 1;
+                
+                // Only deduct if order was previously in pending status
+                if (order.status === 'pending') {
+                  const newStock = Math.max(0, product.current_stock - quantityToDeduct);
+                  
+                  // Update product stock
+                  await stockService.updateProduct(product.id, {
+                    current_stock: newStock
+                  });
+                  
+                  message.success(
+                    `📦 ${t("orders.confirmedAndStockDeducted")}: ${product.name} (${quantityToDeduct} ${t("stock.units")} ${t("stock.reserved")})`
+                  );
+                  
+                  // Refresh products list
+                  fetchProducts();
+                }
+              }
+            }
+          } catch (error) {
+            console.error("Error updating stock on confirmation:", error);
+            message.warning(t("stock.stockUpdateError"));
+          }
+        }
+        
+        // Show Ecotrack info
+        console.log(`🚚 Showing Ecotrack confirmation message for order ${orderId}`);
+        message.info('📦 Order confirmed! Ecotrack shipment will be created automatically.', 4);
+        
+        // Refresh orders after a short delay to get updated tracking info
+        console.log(`🔄 Scheduling order refresh in 2 seconds...`);
+        setTimeout(() => {
+          console.log(`🔄 Refreshing orders to get Ecotrack data...`);
+          fetchOrders();
+        }, 2000);
+      } else {
+        // Show success message for other status changes
+        message.success(t("orders.statusUpdateSuccess"));
+        fetchOrders();
+      }
     } catch (error) {
       message.error(t("orders.statusUpdateError"));
     }
@@ -1022,13 +1204,29 @@ const OrderManagement = () => {
             icon={<EditOutlined />}
             onClick={() => {
               setEditingOrder(record);
+              
+              // Parse product_details if it exists and is valid JSON
+              let productInfo = {};
+              if (record.product_details) {
+                try {
+                  const parsed = typeof record.product_details === 'string' 
+                    ? JSON.parse(record.product_details) 
+                    : record.product_details;
+                  
+                  // If it's already an object with the expected structure, use it
+                  if (parsed && typeof parsed === 'object') {
+                    productInfo = parsed;
+                  }
+                } catch (error) {
+                  console.warn('Could not parse product_details as JSON:', error);
+                  // If parsing fails, try to extract info from string
+                  productInfo = { description: record.product_details };
+                }
+              }
+
               form.setFieldsValue({
                 ...record,
-                product_details: JSON.stringify(
-                  record.product_details,
-                  null,
-                  2
-                ),
+                product_info: productInfo,
               });
               setModalVisible(true);
             }}
@@ -1334,21 +1532,6 @@ const OrderManagement = () => {
             <Row gutter={16}>
               <Col span={6}>
                 <Form.Item
-                  name="pricing_level"
-                  label={t("delivery.pricingLevel")}
-                  initialValue="wilaya"
-                >
-                  <Select
-                    value={pricingLevel}
-                    onChange={handlePricingLevelChange}
-                  >
-                    <Option value="wilaya">{t("delivery.wilaya")}</Option>
-                    <Option value="baladia">{t("delivery.baladia")}</Option>
-                  </Select>
-                </Form.Item>
-              </Col>
-              <Col span={6}>
-                <Form.Item
                   name="wilaya_id"
                   label={t("delivery.wilaya")}
                   rules={[
@@ -1361,10 +1544,50 @@ const OrderManagement = () => {
                     optionFilterProp="children"
                     onChange={handleWilayaChange}
                     loading={loadingWilayas}
+                    filterOption={(input, option) =>
+                      option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                    }
                   >
                     {wilayas.map((wilaya) => (
                       <Option key={wilaya.id} value={wilaya.id}>
                         {wilaya.code} - {wilaya.name_fr}
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item
+                  name="baladia_id"
+                  label={t("delivery.baladia")}
+                >
+                  <Select
+                    placeholder={
+                      selectedWilaya 
+                        ? t("delivery.selectBaladia")
+                        : t("delivery.selectWilayaFirst")
+                    }
+                    showSearch
+                    optionFilterProp="children"
+                    loading={loadingBaladias}
+                    disabled={!selectedWilaya || loadingBaladias}
+                    onChange={handleDeliveryFieldChange}
+                    filterOption={(input, option) =>
+                      option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                    }
+                    notFoundContent={
+                      loadingBaladias ? (
+                        <div style={{ textAlign: 'center', padding: '8px' }}>
+                          <Spin size="small" /> {t("common.loading")}...
+                        </div>
+                      ) : (
+                        t("delivery.noBaladias")
+                      )
+                    }
+                  >
+                    {baladias.map((baladia) => (
+                      <Option key={baladia.id} value={baladia.id}>
+                        {baladia.name_fr}
                       </Option>
                     ))}
                   </Select>
@@ -1483,10 +1706,130 @@ const OrderManagement = () => {
               { required: true, message: t("orders.productDetailsRequired") },
             ]}
           >
-            <TextArea
-              rows={4}
-              placeholder={t("orders.productDetailsPlaceholder")}
-            />
+            <Card size="small" style={{ backgroundColor: '#fafafa' }}>
+              <Row gutter={[16, 16]}>
+                <Col span={12}>
+                  <Form.Item
+                    name={['product_info', 'sku']}
+                    label={t("orders.productSku")}
+                    style={{ marginBottom: 8 }}
+                  >
+                    <Select
+                      placeholder={t("orders.selectProductSku")}
+                      showSearch
+                      optionFilterProp="children"
+                      loading={loadingProducts}
+                      onChange={handleProductSelection}
+                      filterOption={(input, option) =>
+                        option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                      }
+                    >
+                      {products.map((product) => (
+                        <Option key={product.sku} value={product.sku}>
+                          {product.sku} - {product.name}
+                        </Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name={['product_info', 'name']}
+                    label={t("orders.productName")}
+                    style={{ marginBottom: 8 }}
+                  >
+                    <Input 
+                      placeholder={t("orders.enterProductName")} 
+                      disabled={selectedProduct}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={6}>
+                  <Form.Item
+                    name={['product_info', 'quantity']}
+                    label={t("orders.productQuantity")}
+                    style={{ marginBottom: 8 }}
+                  >
+                    <Input 
+                      type="number" 
+                      min={1} 
+                      placeholder="1"
+                      max={productStock || undefined}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={6}>
+                  <Form.Item
+                    name={['product_info', 'unit_price']}
+                    label={t("orders.unitPrice")}
+                    style={{ marginBottom: 8 }}
+                  >
+                    <Input 
+                      type="number" 
+                      min={0} 
+                      suffix="DA" 
+                      placeholder="0"
+                      disabled={selectedProduct}
+                    />
+                  </Form.Item>
+                </Col>
+                {selectedProduct && (
+                  <Col span={12}>
+                    <Card 
+                      size="small" 
+                      style={{ 
+                        backgroundColor: productStock <= 5 ? '#fff2f0' : '#f6ffed',
+                        border: `1px solid ${productStock <= 5 ? '#ffccc7' : '#b7eb8f'}`
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text strong>{t("stock.currentStock")}:</Text>
+                        <Tag color={productStock <= 5 ? 'red' : productStock <= 10 ? 'orange' : 'green'}>
+                          {productStock} {t("stock.units")}
+                        </Tag>
+                      </div>
+                      {productStock <= 5 && (
+                        <div style={{ marginTop: 4, color: '#ff4d4f', fontSize: '12px' }}>
+                          ⚠️ {t("stock.lowStockWarning")}
+                        </div>
+                      )}
+                    </Card>
+                  </Col>
+                )}
+                <Col span={12}>
+                  <Form.Item
+                    name={['product_info', 'category']}
+                    label={t("orders.productCategory")}
+                    style={{ marginBottom: 8 }}
+                  >
+                    <Input 
+                      placeholder={t("orders.enterProductCategory")}
+                      disabled={selectedProduct}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={24}>
+                  <Form.Item
+                    name={['product_info', 'description']}
+                    label={t("orders.productDescription")}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <TextArea
+                      rows={3}
+                      placeholder={t("orders.enterProductDescription")}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <div style={{ marginTop: 8, padding: '8px', backgroundColor: '#f0f0f0', borderRadius: '4px', fontSize: '12px', color: '#666' }}>
+                💡 {t("orders.productDetailsHint")}
+                {selectedProduct && (
+                  <div style={{ marginTop: 4, color: '#1890ff' }}>
+                    📦 {t("stock.autoStockDeduction")}
+                  </div>
+                )}
+              </div>
+            </Card>
           </Form.Item>
           {editingOrder && (
             <Form.Item name="status" label={t("orders.status")}>

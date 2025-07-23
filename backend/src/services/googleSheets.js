@@ -179,13 +179,13 @@ class GoogleSheetsService {
   }
 
   // Import orders from a Google Sheet
-  async importOrdersFromSheet(userId, spreadsheetId, sheetName = 'Sheet1', options = {}) {
+  async importOrdersFromSheet(spreadsheetId, sheetRange, userId) {
     try {
       const sheets = await this.getSheetsClient(userId);
-      const { pool } = require('../config/database');
+      const { pool } = require('../../config/database');
       
       // Get all data from the sheet
-      const range = options.range || `${sheetName}!A:L`;
+      const range = sheetRange || 'Orders!A2:L';
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: spreadsheetId,
         range: range
@@ -214,58 +214,82 @@ class GoogleSheetsService {
         const rowNumber = i + 2; // +2 because we skip header and array is 0-indexed
         
         try {
-          // Map row data to order fields (adjust mapping as needed)
+          // Map row data to order fields - French Excel format
           const orderData = {
-            order_number: row[0] || `IMPORT-${Date.now()}-${i}`,
-            customer_name: row[1] || '',
-            customer_phone: row[2] || '',
-            customer_email: row[3] || '',
-            customer_address: row[4] || '',
-            customer_city: row[5] || '',
-            product_name: row[6] || '',
-            quantity: parseInt(row[7]) || 1,
-            unit_price: parseFloat(row[8]) || 0,
-            total_amount: parseFloat(row[9]) || 0,
-            payment_method: row[10] || 'cash_on_delivery',
-            status: row[11] || 'pending',
-            notes: row[12] || ''
+            order_number: row[0] || `IMPORT-${Date.now()}-${i}`, // reference commande
+            customer_name: row[1] || '', // nom et prenom du client
+            customer_phone: row[2] || '', // telephone (obligatoire)
+            customer_phone_2: row[3] || '', // telephone 2
+            customer_address: row[4] || '', // adresse de livraison
+            customer_city: row[5] || '', // commune de livraison
+            total_amount: parseFloat(String(row[6]).replace(/[^\d.-]/g, '')) || 0, // montant du colis
+            wilaya_code: row[7] || '', // code wilaya
+            product_details: row[8] || '', // produit
+            notes: row[9] || '', // remarque
+            weight: parseFloat(row[10]) || 0, // poids (en kg)
+            metro_delivery: row[11] && String(row[11]).toLowerCase().includes('oui') ? 1 : 0, // metro delivery (0 or 1)
+            status: 'pending',
+            payment_status: 'cod_pending'
           };
 
-          // Validate required fields
-          if (!orderData.customer_name || !orderData.customer_phone) {
-            errors.push(`Row ${rowNumber}: Missing customer name or phone`);
+          // Validate required fields based on French format
+          if (!orderData.customer_name) {
+            errors.push(`Row ${rowNumber}: Missing customer name (nom et prenom du client)`);
+            continue;
+          }
+          
+          if (!orderData.customer_phone) {
+            errors.push(`Row ${rowNumber}: Missing phone number (telephone)`);
+            continue;
+          }
+          
+          if (!orderData.total_amount || orderData.total_amount <= 0) {
+            errors.push(`Row ${rowNumber}: Missing or invalid package amount (montant du colis)`);
+            continue;
+          }
+          
+          if (!orderData.wilaya_code) {
+            errors.push(`Row ${rowNumber}: Missing wilaya code (code wilaya)`);
             continue;
           }
 
-          // Insert into database
+          // Create product details JSON
+          const productInfo = {
+            name: orderData.product_details,
+            weight: orderData.weight,
+            metro_delivery: orderData.metro_delivery
+          };
+
+          // Insert into database with French format mapping
           const [result] = await pool.query(`
             INSERT INTO orders (
-              order_number, customer_name, customer_phone, customer_email,
-              customer_address, customer_city, product_name, quantity,
-              unit_price, total_amount, payment_method, status, notes,
-              created_at, assigned_to
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+              order_number, customer_name, customer_phone, customer_address,
+              customer_city, product_details, total_amount, status,
+              payment_status, notes, created_at, assigned_to,
+              wilaya_code, weight, metro_delivery
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?)
           `, [
             orderData.order_number,
             orderData.customer_name,
             orderData.customer_phone,
-            orderData.customer_email,
             orderData.customer_address,
             orderData.customer_city,
-            orderData.product_name,
-            orderData.quantity,
-            orderData.unit_price,
+            JSON.stringify(productInfo),
             orderData.total_amount,
-            orderData.payment_method,
             orderData.status,
+            orderData.payment_status,
             orderData.notes,
-            userId // assigned_to
+            null, // assigned_to - NOT assigned to anyone
+            orderData.wilaya_code,
+            orderData.weight,
+            orderData.metro_delivery
           ]);
 
           imported.push({
             id: result.insertId,
             order_number: orderData.order_number,
-            customer_name: orderData.customer_name
+            customer_name: orderData.customer_name,
+            total_amount: orderData.total_amount
           });
 
         } catch (error) {
