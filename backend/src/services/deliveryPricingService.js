@@ -2,8 +2,20 @@ const { pool } = require('../../config/database');
 
 class DeliveryPricingService {
   // Get all wilayas with their delivery pricing
-  static async getAllWilayasWithPricing() {
+  static async getAllWilayasWithPricing(statusFilter = null) {
     try {
+      let whereClause = '';
+      const queryParams = [];
+
+      // Build WHERE clause based on status filter
+      if (statusFilter === 'active') {
+        whereClause = 'WHERE w.is_active = true';
+      } else if (statusFilter === 'inactive') {
+        whereClause = 'WHERE w.is_active = false';
+      } else {
+        whereClause = 'WHERE 1=1'; // No filter, get all
+      }
+
       const [wilayas] = await pool.query(`
         SELECT 
           w.id,
@@ -28,7 +40,7 @@ class DeliveryPricingService {
           ) as pricing_options
         FROM wilayas w
         LEFT JOIN delivery_pricing dp ON w.id = dp.wilaya_id AND dp.is_active = true
-        WHERE w.is_active = true
+        ${whereClause}
         GROUP BY w.id
         ORDER BY w.code
       `);
@@ -442,7 +454,26 @@ class DeliveryPricingService {
       const [pricing] = await pool.query(query, params);
 
       if (!pricing.length) {
-        throw new Error('No delivery pricing found for the specified location');
+        // Try fallback to wilaya-level pricing if baladia-specific not found
+        if (pricing_level === 'baladia' && baladia_id) {
+          console.log('No baladia-specific pricing found, falling back to wilaya pricing');
+          return await this.calculateDeliveryPrice(wilaya_id, delivery_type, weight, 0);
+        }
+        
+        // Ultimate fallback with default pricing
+        console.log('No pricing found for wilaya, using default pricing');
+        return {
+          price: delivery_type === 'home' ? 500.00 : 450.00,
+          delivery_time_min: 48,
+          delivery_time_max: 96,
+          breakdown: {
+            base_price: delivery_type === 'home' ? 500.00 : 450.00,
+            weight_additional: 0,
+            volume_additional: 0
+          },
+          wilaya_name: 'Unknown',
+          baladia_name: null
+        };
       }
 
       const pricingData = pricing[0];

@@ -15,6 +15,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       const [totalOrders] = await pool.query('SELECT COUNT(*) as count FROM orders');
       const [pendingOrders] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE status = "pending"');
       const [completedOrders] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE status = "delivered"');
+      const [cancelledOrders] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE status = "cancelled"');
       const [totalRevenue] = await pool.query('SELECT SUM(total_amount) as total FROM orders WHERE status = "delivered"');
       const [activeUsers] = await pool.query('SELECT COUNT(*) as count FROM users WHERE is_active = true');
 
@@ -22,6 +23,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         totalOrders: totalOrders[0].count,
         pendingOrders: pendingOrders[0].count,
         completedOrders: completedOrders[0].count,
+        cancelledOrders: cancelledOrders[0].count,
         totalRevenue: totalRevenue[0].total || 0,
         activeUsers: activeUsers[0].count
       });
@@ -30,12 +32,14 @@ router.get('/stats', authenticateToken, async (req, res) => {
       const [myOrders] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE assigned_to = ?', [userId]);
       const [myPending] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE assigned_to = ? AND status = "pending"', [userId]);
       const [myCompleted] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE assigned_to = ? AND status = "delivered"', [userId]);
+      const [myCancelled] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE assigned_to = ? AND status = "cancelled"', [userId]);
       const [myToday] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE assigned_to = ? AND DATE(created_at) = CURDATE()', [userId]);
 
       res.json({
         myOrders: myOrders[0].count,
         myPending: myPending[0].count,
         myCompleted: myCompleted[0].count,
+        myCancelled: myCancelled[0].count,
         myToday: myToday[0].count
       });
     }
@@ -80,7 +84,8 @@ router.get('/trends', authenticateToken, async (req, res) => {
         DATE(created_at) as date,
         COUNT(*) as total,
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered
+        SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered,
+        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
       FROM orders 
       WHERE DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
       ${!isAdmin ? 'AND assigned_to = ?' : ''}

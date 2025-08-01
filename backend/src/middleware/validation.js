@@ -56,7 +56,23 @@ const schemas = {
     ).required(),
     total_amount: Joi.number().positive().precision(2).required(),
     delivery_date: Joi.date().optional(),
-    notes: Joi.string().max(1000).optional()
+    notes: Joi.string().max(1000).optional(),
+    
+    // Delivery-related fields
+    wilaya_id: Joi.number().integer().optional(),
+    baladia_id: Joi.number().integer().optional(),
+    delivery_type: Joi.string().valid('home', 'office', 'pickup_point', 'les_changes').default('home').optional(),
+    delivery_price: Joi.number().min(0).precision(2).optional(),
+    product_weight: Joi.number().positive().default(1.0).optional(),
+    pricing_level: Joi.string().valid('wilaya', 'baladia').default('wilaya').optional(),
+    
+    // Additional optional fields that might be sent by frontend
+    customer_email: Joi.string().email().optional(),
+    weight: Joi.number().positive().optional(),
+    volume: Joi.number().min(0).optional(),
+    status: Joi.string().valid('pending', 'confirmed', 'processing', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'on_hold').optional(),
+    payment_status: Joi.string().valid('unpaid', 'cod_pending', 'paid').optional(),
+    final_total: Joi.number().min(0).precision(2).optional()
   }),
 
   updateOrder: Joi.object({
@@ -77,8 +93,9 @@ const schemas = {
     // Delivery management
     wilaya_id: Joi.number().integer().optional(),
     baladia_id: Joi.number().integer().optional(),
-    delivery_type: Joi.string().valid('domicile', 'desk', 'home', 'office', 'pickup').optional(),
+    delivery_type: Joi.string().valid('home', 'office', 'pickup_point', 'les_changes').optional(),
     delivery_price: Joi.number().min(0).precision(2).optional(),
+    product_weight: Joi.number().positive().optional(),
     pricing_level: Joi.string().valid('wilaya', 'baladia').optional(),
     
     // Order status and workflow
@@ -170,16 +187,36 @@ const schemas = {
     product_id: Joi.number().integer().required(),
     variant_name: Joi.string().min(2).max(255).required(),
     sku: Joi.string().min(2).max(100).required(),
-    barcode: Joi.string().max(100).optional(),
+    barcode: Joi.alternatives().try(
+      Joi.string().max(100),
+      Joi.allow(null, '')
+    ).optional(),
     cost_price: Joi.number().min(0).precision(2).optional(),
     selling_price: Joi.number().min(0).precision(2).optional(),
-    weight: Joi.number().min(0).precision(3).optional(),
-    dimensions: Joi.string().max(100).optional(),
-    color: Joi.string().max(50).optional(),
-    size: Joi.string().max(50).optional(),
-    material: Joi.string().max(100).optional(),
+    weight: Joi.alternatives().try(
+      Joi.number().min(0).precision(3),
+      Joi.allow(null, '')
+    ).optional(),
+    dimensions: Joi.alternatives().try(
+      Joi.string().max(100),
+      Joi.allow(null, '')
+    ).optional(),
+    color: Joi.alternatives().try(
+      Joi.string().max(50),
+      Joi.allow(null, '')
+    ).optional(),
+    size: Joi.alternatives().try(
+      Joi.string().max(50),
+      Joi.allow(null, '')
+    ).optional(),
+    material: Joi.alternatives().try(
+      Joi.string().max(100),
+      Joi.allow(null, '')
+    ).optional(),
     attributes: Joi.object().optional(),
-    is_active: Joi.boolean().optional()
+    is_active: Joi.boolean().optional(),
+    current_stock: Joi.number().integer().min(0).optional(),
+    location_id: Joi.number().integer().optional()
   }),
 
   // Product validation (updated with category_id)

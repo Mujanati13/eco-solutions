@@ -9,7 +9,8 @@ const router = express.Router();
 // Get all wilayas with their delivery pricing
 router.get('/wilayas', authenticateToken, async (req, res) => {
   try {
-    const wilayas = await DeliveryPricingService.getAllWilayasWithPricing();
+    const { status } = req.query; // Get status filter from query params
+    const wilayas = await DeliveryPricingService.getAllWilayasWithPricing(status);
     res.json({
       success: true,
       data: wilayas

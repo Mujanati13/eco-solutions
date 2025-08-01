@@ -37,6 +37,10 @@ router.get('/stats', authenticateToken, async (req, res) => {
         'SELECT COUNT(*) as count FROM orders WHERE status = "delivered"'
       );
 
+      const [cancelledOrders] = await pool.query(
+        'SELECT COUNT(*) as count FROM orders WHERE status = "cancelled"'
+      );
+
       const [totalRevenue] = await pool.query(
         'SELECT SUM(total_amount) as revenue FROM orders WHERE status = "delivered"'
       );
@@ -51,6 +55,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
         pending_orders: pendingOrders[0].count,
         confirmed_orders: confirmedOrders[0].count,
         delivered_orders: deliveredOrders[0].count,
+        cancelled_orders: cancelledOrders[0].count,
         total_revenue: totalRevenue[0].revenue || 0,
         active_employees: activeEmployees[0].count
       };
@@ -81,12 +86,18 @@ router.get('/stats', authenticateToken, async (req, res) => {
         [userId]
       );
 
+      const [myCancelledOrders] = await pool.query(
+        'SELECT COUNT(*) as count FROM orders WHERE assigned_to = ? AND status = "cancelled"',
+        [userId]
+      );
+
       stats = {
         my_orders: myOrders[0].count,
         my_today_orders: myTodayOrders[0].count,
         my_pending_orders: myPendingOrders[0].count,
         my_confirmed_orders: myConfirmedOrders[0].count,
-        my_delivered_orders: myDeliveredOrders[0].count
+        my_delivered_orders: myDeliveredOrders[0].count,
+        my_cancelled_orders: myCancelledOrders[0].count
       };
     }
 
@@ -299,17 +310,17 @@ router.get('/product-stats', authenticateToken, requirePermission('canViewProduc
       'SELECT COUNT(*) as count FROM products WHERE is_active = true'
     );
 
-    // Get low stock products (where total stock is below minimum stock level)
+    // Get low stock products (where total stock is below 10 units - arbitrary threshold)
     const [lowStockProducts] = await pool.query(`
       SELECT COUNT(DISTINCT p.id) as count 
       FROM products p
       LEFT JOIN stock_levels sl ON p.id = sl.product_id
       WHERE p.is_active = true 
-      AND p.minimum_stock_level > COALESCE((
+      AND COALESCE((
         SELECT SUM(quantity_available) 
         FROM stock_levels 
         WHERE product_id = p.id
-      ), 0)
+      ), 0) BETWEEN 1 AND 10
     `);
 
     // Get out of stock products
@@ -415,15 +426,16 @@ router.get('/low-stock-alerts', authenticateToken, requirePermission('canViewPro
   try {
     const [alerts] = await pool.query(`
       SELECT 
-        p.id, p.name, p.sku, p.category, p.minimum_stock_level as reorder_level,
+        p.id, p.name, p.sku, p.category, 
+        10 as reorder_level,
         COALESCE(SUM(sl.quantity_available), 0) as current_stock,
-        (p.minimum_stock_level - COALESCE(SUM(sl.quantity_available), 0)) as shortage
+        (10 - COALESCE(SUM(sl.quantity_available), 0)) as shortage
       FROM products p
       LEFT JOIN stock_levels sl ON p.id = sl.product_id
       WHERE p.is_active = true
       GROUP BY p.id
-      HAVING current_stock <= p.minimum_stock_level
-      ORDER BY shortage DESC
+      HAVING current_stock <= 10 AND current_stock > 0
+      ORDER BY current_stock ASC
       LIMIT 20
     `);
 

@@ -44,6 +44,93 @@ class RealTimeSessionService {
     }
   }
 
+  // Track API activity and manage session timeout (10 minutes = 600 seconds)
+  static async trackApiActivity(userId, sessionId, activityData = {}) {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const now = new Date();
+      
+      // Check if there's an active session
+      const [existingSessions] = await pool.query(`
+        SELECT id, start_time, last_activity, is_paused, paused_duration, 
+               TIMESTAMPDIFF(SECOND, last_activity, NOW()) as seconds_since_activity
+        FROM real_time_sessions 
+        WHERE user_id = ? AND session_id = ? AND date = ? AND is_active = true
+        ORDER BY start_time DESC LIMIT 1
+      `, [userId, sessionId, today]);
+
+      if (existingSessions.length > 0) {
+        const session = existingSessions[0];
+        const secondsSinceActivity = session.seconds_since_activity;
+        
+        // If more than 10 minutes (600 seconds) have passed, the session was paused
+        if (secondsSinceActivity > 600) {
+          // Resume the session - add the inactive time to paused_duration
+          const additionalPausedTime = secondsSinceActivity;
+          
+          await pool.query(`
+            UPDATE real_time_sessions 
+            SET last_activity = NOW(),
+                is_paused = false,
+                paused_duration = COALESCE(paused_duration, 0) + ?,
+                resume_count = COALESCE(resume_count, 0) + 1
+            WHERE id = ?
+          `, [additionalPausedTime, session.id]);
+          
+          console.log(`Session resumed for user ${userId}. Was paused for ${additionalPausedTime} seconds.`);
+        } else {
+          // Normal activity update
+          await pool.query(`
+            UPDATE real_time_sessions 
+            SET last_activity = NOW()
+            WHERE id = ?
+          `, [session.id]);
+        }
+      } else {
+        // No active session, create a new one
+        await this.startRealTimeSession(userId, sessionId, null);
+      }
+
+      // Log the API activity
+      await pool.query(`
+        INSERT INTO session_activity_log 
+        (user_id, session_id, date, activity_type, endpoint, method, timestamp)
+        VALUES (?, ?, ?, 'api_call', ?, ?, NOW())
+      `, [userId, sessionId, today, activityData.endpoint || '', activityData.method || '']);
+
+      return true;
+    } catch (error) {
+      console.error('Error tracking API activity:', error);
+      throw error;
+    }
+  }
+
+  // Background job to pause inactive sessions
+  static async pauseInactiveSessions() {
+    try {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+      
+      // Find sessions that have been inactive for more than 10 minutes
+      const [inactiveSessions] = await pool.query(`
+        UPDATE real_time_sessions 
+        SET is_paused = true,
+            paused_at = last_activity
+        WHERE is_active = true 
+          AND is_paused = false 
+          AND last_activity < ?
+      `, [tenMinutesAgo]);
+
+      if (inactiveSessions.affectedRows > 0) {
+        console.log(`Paused ${inactiveSessions.affectedRows} inactive sessions`);
+      }
+
+      return inactiveSessions.affectedRows;
+    } catch (error) {
+      console.error('Error pausing inactive sessions:', error);
+      throw error;
+    }
+  }
+
   // End real-time session and calculate duration
   static async endRealTimeSession(userId, sessionId, socketId = null) {
     try {
@@ -70,12 +157,15 @@ class RealTimeSessionService {
   // Update daily session summary
   static async updateDailySummary(userId, date) {
     try {
-      // Calculate totals for the day
+      // Calculate totals for the day, excluding paused time from active time
       const [sessionData] = await pool.query(`
         SELECT 
           COUNT(*) as session_count,
           SUM(duration_seconds) as total_time,
+          SUM(GREATEST(COALESCE(duration_seconds, 0) - COALESCE(paused_duration, 0), 0)) as active_time,
+          SUM(COALESCE(paused_duration, 0)) as total_paused_time,
           SUM(page_views) as total_page_views,
+          SUM(COALESCE(resume_count, 0)) as total_resumes,
           MIN(TIME(start_time)) as first_login,
           MAX(TIME(COALESCE(end_time, last_activity))) as last_logout
         FROM real_time_sessions
@@ -99,12 +189,20 @@ class RealTimeSessionService {
         `, [
           userId,
           date,
-          data.total_time || 0,
+          data.active_time || 0, // Use active time (total - paused) instead of total time
           data.session_count || 0,
           data.total_page_views || 0,
           data.first_login,
           data.last_logout
         ]);
+
+        console.log(`📊 Updated daily summary for user ${userId} on ${date}:`, {
+          active_time: data.active_time,
+          total_time: data.total_time,
+          paused_time: data.total_paused_time,
+          sessions: data.session_count,
+          resumes: data.total_resumes
+        });
       }
 
       return true;

@@ -304,36 +304,6 @@ router.get('/sessions', authenticateToken, async (req, res) => {
   }
 });
 
-// Export user session history
-router.get('/sessions/export', authenticateToken, async (req, res) => {
-  try {
-    const { format = 'csv', start_date, end_date } = req.query;
-    const sessions = await SessionService.getUserSessions(req.user.id, 1000, start_date, end_date);
-    
-    // Convert to CSV format
-    const headers = ['Login Time', 'Logout Time', 'Duration (seconds)', 'Status', 'IP Address', 'Browser'];
-    const csvContent = [
-      headers.join(','),
-      ...sessions.map(session => [
-        new Date(session.login_time).toISOString(),
-        session.logout_time ? new Date(session.logout_time).toISOString() : 'Still Active',
-        session.session_duration || 0,
-        session.is_active ? 'Active' : (session.logout_time ? 'Completed' : 'Expired'),
-        session.ip_address || 'Unknown',
-        session.user_agent ? session.user_agent.split(' ')[0] : 'Unknown'
-      ].map(field => `"${field}"`).join(','))
-    ].join('\n');
-
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename=session_history_${new Date().toISOString().split('T')[0]}.csv`);
-    res.send(csvContent);
-    
-  } catch (error) {
-    console.error('Sessions export error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // Get user activity logs
 router.get('/activities', authenticateToken, async (req, res) => {
   try {

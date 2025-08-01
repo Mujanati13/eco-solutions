@@ -9,6 +9,7 @@ const { testConnection, pool } = require('../config/database');
 const Database = require('../config/initDatabase');
 const trackingCronService = require('./services/trackingCronService');
 const SessionCleanupService = require('./services/sessionCleanupService');
+const sessionTimeoutService = require('./services/sessionTimeoutService');
 const { trackSessionActivity } = require('./middleware/sessionTracker');
 const socketService = require('./services/socketService');
 
@@ -137,6 +138,9 @@ const startServer = async () => {
       
       // Start session cleanup service
       SessionCleanupService.start();
+      
+      // Start session timeout service for automatic pause/resume
+      sessionTimeoutService.start();
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
@@ -180,6 +184,7 @@ const gracefulShutdown = async (signal) => {
     // Stop cleanup services
     SessionCleanupService.stop();
     trackingCronService.stop();
+    sessionTimeoutService.stop();
     
     // Close database connections
     await pool.end();

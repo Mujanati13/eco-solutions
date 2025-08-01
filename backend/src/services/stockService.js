@@ -142,7 +142,7 @@ class StockService {
       await connection.beginTransaction();
 
       const {
-        sku, name, description, category, brand, unit_of_measure,
+        sku, name, description, external_link, category, brand, unit_of_measure,
         cost_price, selling_price, barcode, is_active = true,
         current_stock = 0, location_id = 1, category_id
       } = productData;
@@ -150,12 +150,12 @@ class StockService {
       // Insert product
       const [result] = await connection.query(`
         INSERT INTO products (
-          sku, name, description, category, brand, unit_of_measure,
-          cost_price, selling_price, barcode, is_active, created_by, category_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          sku, name, description, external_link, category, brand, unit_of_measure,
+          cost_price, selling_price, barcode, is_active, created_by, category_id, location_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        sku, name, description, category, brand, unit_of_measure,
-        cost_price, selling_price, barcode, is_active, createdBy, category_id
+        sku, name, description, external_link, category, brand, unit_of_measure,
+        cost_price, selling_price, barcode, is_active, createdBy, category_id, location_id
       ]);
 
       const productId = result.insertId;
@@ -194,20 +194,20 @@ class StockService {
       await connection.beginTransaction();
 
       const {
-        sku, name, description, category, brand, unit_of_measure,
-        cost_price, selling_price, barcode, is_active, current_stock, category_id
+        sku, name, description, external_link, category, brand, unit_of_measure,
+        cost_price, selling_price, barcode, is_active, current_stock, category_id, location_id
       } = productData;
 
       // Update product basic info
       const [result] = await connection.query(`
         UPDATE products SET
-          sku = ?, name = ?, description = ?, category = ?, brand = ?,
+          sku = ?, name = ?, description = ?, external_link = ?, category = ?, brand = ?,
           unit_of_measure = ?, cost_price = ?, selling_price = ?,
-          barcode = ?, is_active = ?, category_id = ?
+          barcode = ?, is_active = ?, category_id = ?, location_id = ?
         WHERE id = ?
       `, [
-        sku, name, description, category, brand, unit_of_measure,
-        cost_price, selling_price, barcode, is_active, category_id, id
+        sku, name, description, external_link, category, brand, unit_of_measure,
+        cost_price, selling_price, barcode, is_active, category_id, location_id, id
       ]);
 
       // Update stock level if current_stock is provided

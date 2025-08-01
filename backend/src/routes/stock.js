@@ -30,6 +30,47 @@ router.get('/products/:id', authenticateToken, requirePermission('canViewProduct
   }
 });
 
+// Public product endpoint for product display pages
+router.get('/products/:id/public', async (req, res) => {
+  try {
+    const product = await StockService.getProductById(req.params.id);
+    if (!product || !product.is_active) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Product not found or not available' 
+      });
+    }
+    
+    // Only return public information, hide sensitive data
+    const publicProduct = {
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      description: product.description,
+      selling_price: product.selling_price,
+      current_stock: product.current_stock,
+      category_name: product.category_name,
+      emplacement: product.emplacement || product.location,
+      barcode: product.barcode,
+      image_url: product.image_url,
+      is_active: product.is_active,
+      variants: product.variants || [],
+      images: product.images || []
+    };
+    
+    res.json({
+      success: true,
+      product: publicProduct
+    });
+  } catch (error) {
+    console.error('Get public product error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error' 
+    });
+  }
+});
+
 router.post('/products', authenticateToken, requirePermission('canCreateProducts'), async (req, res) => {
   try {
     const productId = await StockService.createProduct(req.body, req.user.id);
@@ -58,6 +99,20 @@ router.put('/products/:id', authenticateToken, requirePermission('canEditProduct
     } else {
       res.status(500).json({ error: 'Internal server error' });
     }
+  }
+});
+
+// Delete product
+router.delete('/products/:id', authenticateToken, requirePermission('canDeleteProducts'), async (req, res) => {
+  try {
+    const deleted = await StockService.deleteProduct(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+    res.json({ message: 'Product deleted successfully' });
+  } catch (error) {
+    console.error('Delete product error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -207,6 +262,43 @@ router.get('/brands', authenticateToken, requirePermission('canViewProducts'), a
     res.json(brands.map(b => b.brand));
   } catch (error) {
     console.error('Get brands error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Product Link Generation
+router.post('/products/:id/generate-link', authenticateToken, requirePermission('canViewProducts'), async (req, res) => {
+  try {
+    const productId = req.params.id;
+    const product = await StockService.getProductById(productId);
+    
+    if (!product) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    // Generate a unique token for the product link
+    const timestamp = Date.now();
+    const linkToken = `prod_${productId}_${timestamp}`;
+    
+    // In a production environment, you might want to store this token in the database
+    // and set an expiration time
+    
+    const baseUrl = req.get('origin') || 'http://localhost:3000';
+    const productLink = `${baseUrl}/product/${linkToken}?name=${encodeURIComponent(product.name)}&sku=${encodeURIComponent(product.sku)}&price=${product.selling_price || 0}`;
+    
+    res.json({
+      link: productLink,
+      token: linkToken,
+      product: {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        price: product.selling_price
+      },
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours from now
+    });
+  } catch (error) {
+    console.error('Generate product link error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

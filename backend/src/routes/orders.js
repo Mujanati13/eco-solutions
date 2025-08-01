@@ -66,7 +66,7 @@ router.post('/calculate-delivery-price', authenticateToken, async (req, res) => 
     const { 
       wilaya_id, 
       baladia_id, 
-      delivery_type = 'domicile', 
+      delivery_type = 'home', 
       weight = 1, 
       volume = 1,
       pricing_level = 'wilaya'
@@ -625,7 +625,7 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
       try {
         const wilayaId = updates.wilaya_id || order.wilaya_id;
         const baladiaId = updates.baladia_id || order.baladia_id;
-        const deliveryType = updates.delivery_type || order.delivery_type || 'domicile';
+        const deliveryType = updates.delivery_type || order.delivery_type || 'home';
         
         if (wilayaId) {
           const pricingData = {

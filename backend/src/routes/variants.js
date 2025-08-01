@@ -150,7 +150,10 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
 // Create new variant
 router.post('/', authenticateToken, validateVariant, async (req, res) => {
+  const connection = await pool.getConnection();
   try {
+    await connection.beginTransaction();
+    
     const {
       product_id,
       variant_name,
@@ -164,12 +167,15 @@ router.post('/', authenticateToken, validateVariant, async (req, res) => {
       size,
       material,
       attributes,
-      is_active = true
+      is_active = true,
+      current_stock = 0,
+      location_id = 1
     } = req.body;
     
     // Check if product exists
-    const [product] = await pool.query('SELECT id FROM products WHERE id = ?', [product_id]);
+    const [product] = await connection.query('SELECT id FROM products WHERE id = ?', [product_id]);
     if (product.length === 0) {
+      await connection.rollback();
       return res.status(400).json({
         success: false,
         message: 'Product not found'
@@ -177,19 +183,21 @@ router.post('/', authenticateToken, validateVariant, async (req, res) => {
     }
     
     // Check for duplicate SKU
-    const [existingSku] = await pool.query(
+    const [existingSku] = await connection.query(
       'SELECT id FROM product_variants WHERE sku = ?',
       [sku]
     );
     
     if (existingSku.length > 0) {
+      await connection.rollback();
       return res.status(400).json({
         success: false,
         message: 'SKU already exists'
       });
     }
     
-    const [result] = await pool.query(`
+    // Create the variant
+    const [result] = await connection.query(`
       INSERT INTO product_variants (
         product_id, variant_name, sku, barcode, cost_price, selling_price,
         weight, dimensions, color, size, material, attributes, is_active
@@ -201,18 +209,41 @@ router.post('/', authenticateToken, validateVariant, async (req, res) => {
       attributes ? JSON.stringify(attributes) : null, is_active
     ]);
     
-    // Create initial stock levels for all locations
-    const [locations] = await pool.query('SELECT id FROM stock_locations WHERE is_active = true');
+    const variantId = result.insertId;
     
-    for (const location of locations) {
-      await pool.query(`
-        INSERT INTO variant_stock_levels (variant_id, location_id, quantity, reserved_quantity)
-        VALUES (?, ?, 0, 0)
-      `, [result.insertId, location.id]);
+    // Create initial stock levels for all locations
+    const [locations] = await connection.query('SELECT id FROM stock_locations WHERE is_active = true');
+    
+    if (locations.length === 0) {
+      // Create a default location if none exist
+      const [locationResult] = await connection.query(`
+        INSERT INTO stock_locations (name, description, is_active)
+        VALUES ('Main Warehouse', 'Default warehouse location', true)
+      `);
+      locations.push({ id: locationResult.insertId });
     }
     
-    // Fetch the created variant
-    const [newVariant] = await pool.query(`
+    for (const location of locations) {
+      const stockQuantity = location.id === location_id ? current_stock : 0;
+      
+      await connection.query(`
+        INSERT INTO variant_stock_levels (variant_id, location_id, quantity, reserved_quantity)
+        VALUES (?, ?, ?, 0)
+      `, [variantId, location.id, stockQuantity]);
+      
+      // Record stock movement if there's initial stock
+      if (stockQuantity > 0) {
+        await connection.query(`
+          INSERT INTO variant_stock_movements (
+            variant_id, location_id, movement_type, reason, quantity, 
+            quantity_before, quantity_after, reference_type, notes, created_by
+          ) VALUES (?, ?, 'in', 'initial', ?, 0, ?, 'manual', 'Initial variant stock', ?)
+        `, [variantId, location.id, stockQuantity, stockQuantity, req.user?.id || 1]);
+      }
+    }
+    
+    // Fetch the created variant with stock information
+    const [newVariant] = await connection.query(`
       SELECT 
         v.id,
         v.product_id,
@@ -230,26 +261,37 @@ router.post('/', authenticateToken, validateVariant, async (req, res) => {
         v.is_active,
         v.created_at,
         v.updated_at,
-        p.name as product_name
+        p.name as product_name,
+        COALESCE(SUM(vsl.quantity), 0) as current_stock
       FROM product_variants v
       LEFT JOIN products p ON v.product_id = p.id
+      LEFT JOIN variant_stock_levels vsl ON v.id = vsl.variant_id
       WHERE v.id = ?
-    `, [result.insertId]);
+      GROUP BY v.id
+    `, [variantId]);
+    
+    await connection.commit();
     
     res.status(201).json({
       success: true,
       message: 'Variant created successfully',
       data: {
-        variant: newVariant[0]
+        variant: {
+          ...newVariant[0],
+          attributes: newVariant[0].attributes ? JSON.parse(newVariant[0].attributes) : null
+        }
       }
     });
   } catch (error) {
+    await connection.rollback();
     console.error('Error creating variant:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to create variant',
       error: error.message
     });
+  } finally {
+    connection.release();
   }
 });
 

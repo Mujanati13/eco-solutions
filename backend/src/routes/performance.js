@@ -3,6 +3,9 @@ const { pool } = require('../../config/database');
 const { authenticateToken, requireEmployee } = require('../middleware/auth');
 const { requirePermission, requireAnyPermission } = require('../middleware/permissions');
 const RolePermissionService = require('../services/rolePermissionService');
+const XLSX = require('xlsx');
+const { jsPDF } = require('jspdf');
+const autoTable = require('jspdf-autotable');
 
 const router = express.Router();
 
@@ -210,26 +213,81 @@ router.get('/export', authenticateToken, requireAnyPermission(['canExportReports
       )
     ].join('\n');
 
-    // Set appropriate headers based on format
-    let contentType, fileExtension, fileName;
+    // Generate output based on format
+    let contentType, fileExtension, fileName, outputContent;
     
     switch (format.toLowerCase()) {
       case 'excel':
         contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
         fileExtension = 'xlsx';
-        // TODO: Implement actual Excel export using libraries like xlsx or exceljs
-        // For now, we'll return CSV content with Excel MIME type
+        
+        // Create Excel workbook
+        const workbook = XLSX.utils.book_new();
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        
+        // Auto-fit columns
+        const colWidths = headers.map(header => ({
+          wch: Math.max(header.length, 15)
+        }));
+        worksheet['!cols'] = colWidths;
+        
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Performance Report');
+        outputContent = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
         break;
+        
       case 'pdf':
         contentType = 'application/pdf';
         fileExtension = 'pdf';
-        // TODO: Implement actual PDF export using libraries like puppeteer or pdfkit
-        // For now, we'll return CSV content (which won't work for PDF, but maintains API compatibility)
+        
+        // Create PDF document
+        const pdf = new jsPDF();
+        
+        // Add title
+        pdf.setFontSize(16);
+        pdf.text('Performance Report', 14, 22);
+        
+        // Add date range info
+        pdf.setFontSize(10);
+        let reportInfo = `Generated: ${new Date().toLocaleDateString()}`;
+        if (start_date && end_date) {
+          reportInfo += ` | Period: ${start_date} to ${end_date}`;
+        }
+        pdf.text(reportInfo, 14, 30);
+        
+        // Prepare table data
+        const tableHeaders = headers;
+        const tableData = data.map(row => headers.map(header => String(row[header] || '')));
+        
+        // Add table
+        autoTable.default(pdf, {
+          head: [tableHeaders],
+          body: tableData,
+          startY: 35,
+          styles: { fontSize: 8, cellPadding: 2 },
+          headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+          columnStyles: {
+            0: { cellWidth: 20 }, // First Name
+            1: { cellWidth: 20 }, // Last Name
+            2: { cellWidth: 20 }, // Username
+            3: { cellWidth: 30 }, // Email
+            4: { cellWidth: 20 }, // Date
+            5: { cellWidth: 15 }, // Orders Assigned
+            6: { cellWidth: 15 }, // Orders Confirmed
+            7: { cellWidth: 15 }, // Orders Delivered
+            8: { cellWidth: 20 }, // Success Rate
+            9: { cellWidth: 20 }  // Confirmation Rate
+          },
+          margin: { top: 35, left: 14, right: 14 }
+        });
+        
+        outputContent = Buffer.from(pdf.output('arraybuffer'));
         break;
+        
       case 'csv':
       default:
         contentType = 'text/csv';
         fileExtension = 'csv';
+        outputContent = csvContent;
         break;
     }
 
@@ -237,7 +295,7 @@ router.get('/export', authenticateToken, requireAnyPermission(['canExportReports
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename=${fileName}`);
-    res.send(csvContent);
+    res.send(outputContent);
 
   } catch (error) {
     console.error('Export performance reports error:', error);

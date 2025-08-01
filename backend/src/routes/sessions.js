@@ -2,6 +2,9 @@ const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 const RealTimeSessionService = require('../services/realTimeSessionService');
 const socketService = require('../services/socketService');
+const XLSX = require('xlsx');
+const { jsPDF } = require('jspdf');
+const autoTable = require('jspdf-autotable');
 
 const router = express.Router();
 
@@ -187,11 +190,12 @@ router.post('/update-summary/:userId', authenticateToken, async (req, res) => {
   }
 });
 
-// Export session data to CSV
+// Export session data in various formats
 router.get('/export/:startDate/:endDate/:userId?', authenticateToken, async (req, res) => {
   try {
     const { startDate, endDate } = req.params;
     const userId = req.params.userId || req.user.userId;
+    const { format = 'csv' } = req.query; // csv, excel, pdf
     
     // Check if user can access this data
     if (req.user.role !== 'admin' && req.user.userId !== parseInt(userId)) {
@@ -200,27 +204,121 @@ router.get('/export/:startDate/:endDate/:userId?', authenticateToken, async (req
 
     const sessionTimes = await RealTimeSessionService.getUserSessionTimeRange(userId, startDate, endDate);
     
-    // Convert to CSV format
-    const csvHeader = 'Date,User ID,Username,First Name,Last Name,Role,Total Session Time (seconds),Session Count,Page Views,First Login,Last Logout';
-    const csvRows = sessionTimes.map(session => [
-      session.date,
-      session.user_id,
-      session.username,
-      session.first_name,
-      session.last_name,
-      session.role,
-      session.total_session_time,
-      session.session_count,
-      session.page_views,
-      session.first_login || '',
-      session.last_logout || ''
-    ].join(','));
+    if (sessionTimes.length === 0) {
+      return res.status(404).json({ error: 'No session data found for the specified criteria' });
+    }
+
+    // Prepare data for export
+    const headers = ['Date', 'User ID', 'Username', 'First Name', 'Last Name', 'Role', 'Total Session Time (seconds)', 'Session Count', 'Page Views', 'First Login', 'Last Logout'];
+    const data = sessionTimes.map(session => ({
+      'Date': session.date,
+      'User ID': session.user_id,
+      'Username': session.username,
+      'First Name': session.first_name,
+      'Last Name': session.last_name,
+      'Role': session.role,
+      'Total Session Time (seconds)': session.total_session_time,
+      'Session Count': session.session_count,
+      'Page Views': session.page_views,
+      'First Login': session.first_login || '',
+      'Last Logout': session.last_logout || ''
+    }));
+
+    // Generate output based on format
+    let contentType, fileExtension, fileName, outputContent;
     
-    const csvContent = [csvHeader, ...csvRows].join('\n');
-    
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="session-times-${startDate}-to-${endDate}.csv"`);
-    res.send(csvContent);
+    switch (format.toLowerCase()) {
+      case 'excel':
+        contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        fileExtension = 'xlsx';
+        
+        // Create Excel workbook
+        const workbook = XLSX.utils.book_new();
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        
+        // Auto-fit columns
+        const colWidths = headers.map(header => ({
+          wch: Math.max(header.length, 15)
+        }));
+        worksheet['!cols'] = colWidths;
+        
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Session Data');
+        outputContent = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        break;
+        
+      case 'pdf':
+        contentType = 'application/pdf';
+        fileExtension = 'pdf';
+        
+        // Create PDF document
+        const pdf = new jsPDF('l'); // landscape orientation for more columns
+        
+        // Add title
+        pdf.setFontSize(16);
+        pdf.text('Session Time Report', 14, 22);
+        
+        // Add date range info
+        pdf.setFontSize(10);
+        let reportInfo = `Generated: ${new Date().toLocaleDateString()}`;
+        reportInfo += ` | Period: ${startDate} to ${endDate}`;
+        pdf.text(reportInfo, 14, 30);
+        
+        // Prepare table data
+        const tableHeaders = headers;
+        const tableData = data.map(row => headers.map(header => String(row[header] || '')));
+        
+        // Add table
+        autoTable.default(pdf, {
+          head: [tableHeaders],
+          body: tableData,
+          startY: 35,
+          styles: { fontSize: 7, cellPadding: 1 },
+          headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+          columnStyles: {
+            0: { cellWidth: 25 }, // Date
+            1: { cellWidth: 15 }, // User ID
+            2: { cellWidth: 20 }, // Username
+            3: { cellWidth: 20 }, // First Name
+            4: { cellWidth: 20 }, // Last Name
+            5: { cellWidth: 15 }, // Role
+            6: { cellWidth: 25 }, // Session Time
+            7: { cellWidth: 15 }, // Session Count
+            8: { cellWidth: 15 }, // Page Views
+            9: { cellWidth: 20 }, // First Login
+            10: { cellWidth: 20 } // Last Logout
+          },
+          margin: { top: 35, left: 14, right: 14 }
+        });
+        
+        outputContent = Buffer.from(pdf.output('arraybuffer'));
+        break;
+        
+      case 'csv':
+      default:
+        contentType = 'text/csv';
+        fileExtension = 'csv';
+        
+        // Convert to CSV format
+        const csvHeader = headers.join(',');
+        const csvRows = data.map(row => 
+          headers.map(header => {
+            const value = row[header];
+            // Handle values that might contain commas or quotes
+            if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+              return `"${value.replace(/"/g, '""')}"`;
+            }
+            return value || '';
+          }).join(',')
+        );
+        outputContent = [csvHeader, ...csvRows].join('\n');
+        break;
+    }
+
+    fileName = `session-times-${startDate}-to-${endDate}.${fileExtension}`;
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename=${fileName}`);
+    res.send(outputContent);
     
   } catch (error) {
     console.error('Error exporting session data:', error);
