@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   Table,
   Button,
   Space,
   Modal,
   Form,
-  Input,
+  Input,  
   InputNumber,
   Switch,
   Select,
@@ -17,6 +17,11 @@ import {
   Tag,
   Popconfirm,
   Tooltip,
+  Divider,
+  Collapse,
+  List,
+  Dropdown,
+  Menu,
 } from 'antd'
 import {
   PlusOutlined,
@@ -28,6 +33,9 @@ import {
   AppstoreOutlined,
   BranchesOutlined,
   ShoppingCartOutlined,
+  MinusCircleOutlined,
+  LinkOutlined,
+  MoreOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import stockService from '../../services/stockService'
@@ -38,11 +46,13 @@ import './Products.css'
 
 const { Search } = Input
 const { Option } = Select
+const { Panel } = Collapse
 
 const Products = () => {
   const { t } = useTranslation()
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
+  const [locations, setLocations] = useState([])
   const [productsWithOrders, setProductsWithOrders] = useState([])
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
@@ -56,12 +66,19 @@ const Products = () => {
   const [totalProducts, setTotalProducts] = useState(0)
   const [activeProducts, setActiveProducts] = useState(0)
   const [totalValue, setTotalValue] = useState(0)
+  const [quickVariants, setQuickVariants] = useState([])
 
   useEffect(() => {
     fetchProducts()
     fetchCategories()
+    fetchLocations()
     fetchProductsWithOrders()
   }, [])
+
+  // Debug locations state
+  useEffect(() => {
+    console.log('Locations state updated:', locations)
+  }, [locations])
 
   const fetchProducts = async (search = '') => {
     setLoading(true)
@@ -72,6 +89,7 @@ const Products = () => {
       }
       
       const data = await stockService.getProducts(params)
+      console.log('Fetched products data:', data.products?.slice(0, 2)) // Log first 2 products for debugging
       setProducts(data.products || [])
       
       // Calculate statistics
@@ -99,6 +117,18 @@ const Products = () => {
     }
   }
 
+  const fetchLocations = async () => {
+    try {
+      console.log('Fetching locations...')
+      const data = await stockService.getLocations()
+      console.log('Locations data received:', data)
+      setLocations(data || [])
+    } catch (error) {
+      console.error('Error fetching locations:', error)
+      message.error(t('stock.errorFetchingLocations'))
+    }
+  }
+
   const fetchProductsWithOrders = async () => {
     try {
       const response = await orderProductService.getProductsWithOrders()
@@ -117,9 +147,17 @@ const Products = () => {
     setEditingProduct(product)
     setModalVisible(true)
     if (product) {
+      // Find the location name from location_id
+      let locationName = '';
+      if (product.location_id && locations.length > 0) {
+        const location = locations.find(loc => loc.id == product.location_id);
+        locationName = location ? location.name : '';
+      }
+      
       form.setFieldsValue({
         ...product,
         is_active: product.is_active || false,
+        location: locationName, // Set the location name for the select
       })
     } else {
       form.resetFields()
@@ -130,26 +168,144 @@ const Products = () => {
   const handleCancel = () => {
     setModalVisible(false)
     setEditingProduct(null)
+    setQuickVariants([])
     form.resetFields()
+  }
+
+  const handleAddQuickVariant = () => {
+    const productName = form.getFieldValue('name') || 'Product'
+    const productSku = form.getFieldValue('sku') || 'SKU'
+    const costPrice = form.getFieldValue('cost_price') || 0
+    const sellingPrice = form.getFieldValue('selling_price') || 0
+    
+    const newVariant = {
+      id: Date.now(), // temporary ID for the UI
+      variant_name: '',
+      sku: `${productSku}-VAR${quickVariants.length + 1}`,
+      cost_price: costPrice,
+      selling_price: sellingPrice,
+      current_stock: 0,
+      color: '',
+      size: '',
+      is_active: true
+    }
+    
+    setQuickVariants([...quickVariants, newVariant])
+  }
+
+  const handleRemoveQuickVariant = (variantId) => {
+    setQuickVariants(quickVariants.filter(v => v.id !== variantId))
+  }
+
+  const handleQuickVariantChange = (variantId, field, value) => {
+    setQuickVariants(quickVariants.map(variant => 
+      variant.id === variantId 
+        ? { ...variant, [field]: value }
+        : variant
+    ))
   }
 
   const handleSubmit = async (values) => {
     try {
+      let productId
+      
+      // Map location name to location_id
+      if (values.location) {
+        const selectedLocation = locations.find(loc => loc.name === values.location)
+        if (selectedLocation) {
+          values.location_id = selectedLocation.id
+        }
+        delete values.location // Remove the name field
+      }
+      
       if (editingProduct) {
         await stockService.updateProduct(editingProduct.id, values)
+        productId = editingProduct.id
         message.success(t('common.success'))
       } else {
-        await stockService.createProduct(values)
+        const result = await stockService.createProduct(values)
+        productId = result.id || result.data?.id || result.product?.id
         message.success(t('common.success'))
       }
+
+      // Create quick variants if any were added
+      if (quickVariants.length > 0 && productId) {
+        try {
+          const variantService = await import('../../services/variantService')
+          for (const variant of quickVariants) {
+            if (variant.variant_name && variant.variant_name.trim()) {
+              const variantData = {
+                product_id: parseInt(productId),
+                variant_name: variant.variant_name.trim(),
+                sku: variant.sku,
+                cost_price: parseFloat(variant.cost_price) || null,
+                selling_price: parseFloat(variant.selling_price) || null,
+                color: variant.color || null,
+                size: variant.size || null,
+                weight: null, // Ensure weight is null for quick variants
+                is_active: variant.is_active,
+                current_stock: parseInt(variant.current_stock) || 0,
+                location_id: 1 // Default to main location
+              }
+              
+              console.log('Creating variant with data:', variantData)
+              await variantService.default.createVariant(variantData)
+            }
+          }
+          if (quickVariants.some(v => v.variant_name && v.variant_name.trim())) {
+            message.success(t('variants.quickVariantsCreated'))
+          }
+        } catch (variantError) {
+          console.error('Error creating variants:', variantError)
+          
+          // Better error handling for variant creation
+          let errorMessage = t('variants.productCreatedVariantsFailed');
+          if (variantError && typeof variantError === 'object') {
+            if (variantError.details && Array.isArray(variantError.details)) {
+              const errorDetails = variantError.details.map(detail => 
+                `${detail.field}: ${detail.message}`
+              ).join(', ');
+              errorMessage += `: ${errorDetails}`;
+            } else if (variantError.message) {
+              errorMessage += `: ${variantError.message}`;
+            } else if (variantError.error) {
+              errorMessage += `: ${variantError.error}`;
+            }
+          } else if (typeof variantError === 'string') {
+            errorMessage += `: ${variantError}`;
+          }
+          
+          message.error(errorMessage)
+        }
+      }
+
       setModalVisible(false)
       setEditingProduct(null)
+      setQuickVariants([])
       form.resetFields()
       fetchProducts(searchText)
       fetchProductsWithOrders() // Refresh order data too
     } catch (error) {
       console.error('Error saving product:', error)
-      message.error(error.message || t('common.error'))
+      
+      // Better error handling for product creation/update
+      let errorMessage = t('common.error');
+      if (error && typeof error === 'object') {
+        if (error.details && Array.isArray(error.details)) {
+          const errorDetails = error.details.map(detail => 
+            `${detail.field}: ${detail.message}`
+          ).join(', ');
+          errorMessage = `Validation Error: ${errorDetails}`;
+        } else if (error.message) {
+          errorMessage = error.message;
+        } else if (error.error) {
+          errorMessage = error.error;
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
+      message.error(errorMessage)
     }
   }
 
@@ -184,12 +340,40 @@ const Products = () => {
   }
 
   // Helper function to get order info for a product
-  const getProductOrderInfo = (productId) => {
+  const getProductOrderInfo = useCallback((productId) => {
     const productOrderData = productsWithOrders.find(p => p.product_id === productId)
     return productOrderData || { total_orders: 0, total_quantity_sold: 0, total_revenue: 0 }
-  }
+  }, [productsWithOrders])
 
-  const columns = [
+  const columns = useMemo(() => {
+    // Generate category filters from current products data
+    const categoryFilters = products && products.length > 0 
+      ? [...new Set(products.map(p => {
+          // Handle both category_name and category fields
+          const cat = p.category_name || p.category;
+          return cat && String(cat).trim();
+        }).filter(Boolean))].map(cat => ({
+          text: cat,
+          value: cat,
+        }))
+      : [];
+
+    // Generate location filters from current locations data  
+    const locationFilters = locations && locations.length > 0 
+      ? locations.map(location => ({
+          text: location.name,
+          value: location.id,
+        }))
+      : [];
+
+    console.log('Generated filters:', { 
+      categoryFilters: categoryFilters.length, 
+      locationFilters: locationFilters.length,
+      productsCount: products?.length || 0,
+      locationsCount: locations?.length || 0 
+    });
+
+    return [
     {
       title: t('stock.productSKU'),
       dataIndex: 'sku',
@@ -201,6 +385,41 @@ const Products = () => {
       dataIndex: 'name',
       key: 'name',
       sorter: (a, b) => a.name.localeCompare(b.name),
+      filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }) => (
+        <div style={{ padding: 8 }}>
+          <Input
+            placeholder={t('stock.searchByName')}
+            value={selectedKeys[0]}
+            onChange={e => setSelectedKeys(e.target.value ? [e.target.value] : [])}
+            onPressEnter={() => confirm()}
+            style={{ marginBottom: 8, display: 'block' }}
+          />
+          <Space>
+            <Button
+              type="primary"
+              onClick={() => confirm()}
+              size="small"
+              style={{ width: 90 }}
+            >
+              {t('common.search')}
+            </Button>
+            <Button onClick={() => clearFilters()} size="small" style={{ width: 90 }}>
+              {t('common.reset')}
+            </Button>
+          </Space>
+        </div>
+      ),
+      onFilter: (value, record) => {
+        if (!value) return true;
+        const searchTerm = value.toLowerCase();
+        const name = (record.name || '').toLowerCase();
+        const description = (record.description || '').toLowerCase();
+        const sku = (record.sku || '').toLowerCase();
+        
+        return name.includes(searchTerm) || 
+               description.includes(searchTerm) || 
+               sku.includes(searchTerm);
+      },
     },
     {
       title: t('stock.productDescription'),
@@ -212,12 +431,17 @@ const Products = () => {
       title: t('stock.productCategory'),
       dataIndex: 'category_name',
       key: 'category_name',
-      render: (categoryName) => categoryName || '-',
-      filters: [...new Set(products.map(p => p.category_name).filter(Boolean))].map(cat => ({
-        text: cat,
-        value: cat,
-      })),
-      onFilter: (value, record) => record.category_name === value,
+      render: (categoryName, record) => {
+        const category = categoryName || record.category;
+        return category || '-';
+      },
+      filters: categoryFilters,
+      onFilter: (value, record) => {
+        // Handle both category_name and category fields
+        const category = record.category_name || record.category;
+        if (!category || !value) return false;
+        return String(category).trim() === String(value).trim();
+      },
     },
     {
       title: t('stock.productPrice'),
@@ -238,7 +462,8 @@ const Products = () => {
       dataIndex: 'current_stock',
       key: 'current_stock',
       render: (stock, record) => {
-        const stockLevel = stock || 0;
+        // Handle both current_stock and total_stock, convert to number
+        const stockLevel = parseInt(stock) || parseInt(record.total_stock) || 0;
         let color = 'green';
         let alertText = '';
         
@@ -266,7 +491,11 @@ const Products = () => {
           </div>
         );
       },
-      sorter: (a, b) => (a.current_stock || 0) - (b.current_stock || 0),
+      sorter: (a, b) => {
+        const stockA = parseInt(a.current_stock) || parseInt(a.total_stock) || 0;
+        const stockB = parseInt(b.current_stock) || parseInt(b.total_stock) || 0;
+        return stockA - stockB;
+      },
       filters: [
         { text: t('stock.outOfStock'), value: 'out_of_stock' },
         { text: t('stock.lowStock'), value: 'low_stock' },
@@ -274,7 +503,7 @@ const Products = () => {
         { text: t('stock.inStock'), value: 'in_stock' },
       ],
       onFilter: (value, record) => {
-        const stock = record.current_stock || 0;
+        const stock = parseInt(record.current_stock) || parseInt(record.total_stock) || 0;
         switch (value) {
           case 'out_of_stock':
             return stock === 0;
@@ -402,56 +631,101 @@ const Products = () => {
         { text: t('common.yes'), value: true },
         { text: t('common.no'), value: false },
       ],
-      onFilter: (value, record) => record.is_active === value,
+      onFilter: (value, record) => {
+        // Handle database boolean values (1/0, true/false, "1"/"0")
+        const isActive = record.is_active === 1 || record.is_active === true || record.is_active === "1" || record.is_active === "true";
+        return isActive === value;
+      },
+    },
+    {
+      title: t('stock.productLocation'),
+      dataIndex: 'location_id',
+      key: 'location_id',
+      render: (locationId) => {
+        if (!locationId) return '-';
+        const location = locations.find(loc => loc.id == locationId);
+        return location ? location.name : `ID: ${locationId}`;
+      },
+      filters: locationFilters,
+      onFilter: (value, record) => {
+        if (!record.location_id || record.location_id === null) return false;
+        // Handle both string and number comparison from database
+        return String(record.location_id) === String(value);
+      },
     },
     {
       title: t('common.actions'),
       key: 'actions',
-      render: (_, record) => (
-        <Space>
-          <Tooltip title={t('stock.viewOrders')}>
-            <Button
-              type="default"
-              size="small"
-              icon={<ShoppingCartOutlined />}
-              onClick={() => handleShowOrderDetails(record)}
-            />
-          </Tooltip>
-          <Tooltip title={t('variants.manageVariants')}>
-            <Button
-              type="default"
-              size="small"
-              icon={<BranchesOutlined />}
-              onClick={() => handleShowVariants(record)}
-            />
-          </Tooltip>
-          <Tooltip title={t('common.edit')}>
-            <Button
-              type="primary"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => showModal(record)}
-            />
-          </Tooltip>
-          <Popconfirm
-            title={t('common.confirmDelete')}
-            onConfirm={() => handleDelete(record.id)}
-            okText={t('common.yes')}
-            cancelText={t('common.no')}
+      render: (_, record) => {
+        const menuItems = [
+          {
+            key: 'viewOrders',
+            icon: <ShoppingCartOutlined />,
+            label: t('stock.viewOrders'),
+            onClick: () => handleShowOrderDetails(record),
+          },
+          {
+            key: 'manageVariants',
+            icon: <BranchesOutlined />,
+            label: t('variants.manageVariants'),
+            onClick: () => handleShowVariants(record),
+          },
+        ];
+
+        // Add external link action if external_link exists
+        if (record.external_link) {
+          menuItems.push({
+            key: 'openExternalLink',
+            icon: <LinkOutlined />,
+            label: t('stock.openExternalLink'),
+            onClick: () => window.open(record.external_link, '_blank'),
+          });
+        }
+
+        menuItems.push(
+          {
+            key: 'edit',
+            icon: <EditOutlined />,
+            label: t('common.edit'),
+            onClick: () => showModal(record),
+          },
+          {
+            type: 'divider',
+          },
+          {
+            key: 'delete',
+            icon: <DeleteOutlined />,
+            label: t('common.delete'),
+            danger: true,
+            onClick: () => {
+              Modal.confirm({
+                title: t('common.confirmDelete'),
+                content: t('common.confirmDeleteMessage'),
+                onOk: () => handleDelete(record.id),
+                okText: t('common.yes'),
+                cancelText: t('common.no'),
+              });
+            },
+          }
+        );
+
+        return (
+          <Dropdown
+            menu={{ items: menuItems }}
+            trigger={['click']}
+            placement="bottomRight"
           >
-            <Tooltip title={t('common.delete')}>
-              <Button
-                type="primary"
-                danger
-                size="small"
-                icon={<DeleteOutlined />}
-              />
-            </Tooltip>
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ]
+            <Button
+              type="text"
+              size="small"
+              icon={<MoreOutlined />}
+              style={{ transform: 'rotate(90deg)' }}
+            />
+          </Dropdown>
+        );
+      },
+    }];
+  }, [products, locations, productsWithOrders, t, getProductOrderInfo]);
 
   return (
     <div className="products-page">
@@ -556,6 +830,16 @@ const Products = () => {
           </Form.Item>
 
           <Form.Item
+            name="external_link"
+            label={t('stock.externalLink')}
+          >
+            <Input
+              placeholder={t('stock.externalLinkPlaceholder')}
+              prefix={<LinkOutlined />}
+            />
+          </Form.Item>
+
+          <Form.Item
             name="category_id"
             label={t('stock.productCategory')}
           >
@@ -620,12 +904,134 @@ const Products = () => {
           </Form.Item>
 
           <Form.Item
+            name="location"
+            label={t('stock.productLocation')}
+          >
+            <Select
+              placeholder={t('stock.productLocationPlaceholder')}
+              allowClear
+              showSearch
+              optionFilterProp="children"
+              loading={!locations.length}
+            >
+              {locations && locations.length > 0 ? (
+                locations.map(location => (
+                  <Option key={location.id} value={location.name}>
+                    {location.name}
+                  </Option>
+                ))
+              ) : (
+                <Option disabled value="">
+                  {t('stock.noLocationsAvailable')}
+                </Option>
+              )}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
             name="is_active"
             label={t('stock.productActive')}
             valuePropName="checked"
           >
             <Switch />
           </Form.Item>
+
+          {/* Quick Variants Section */}
+          {!editingProduct && (
+            <Divider orientation="left">
+              <Space>
+                <BranchesOutlined />
+                {t('variants.quickVariants')}
+              </Space>
+            </Divider>
+          )}
+          
+          {!editingProduct && (
+            <Form.Item label={t('variants.quickVariantsDescription')}>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Button 
+                  type="dashed" 
+                  onClick={handleAddQuickVariant}
+                  icon={<PlusOutlined />}
+                  style={{ width: '100%' }}
+                >
+                  {t('variants.addQuickVariant')}
+                </Button>
+                
+                {quickVariants.length > 0 && (
+                  <List
+                    size="small"
+                    bordered  
+                    dataSource={quickVariants}
+                    renderItem={(variant) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            key="delete"
+                            type="text"
+                            danger
+                            size="small"
+                            icon={<MinusCircleOutlined />}
+                            onClick={() => handleRemoveQuickVariant(variant.id)}
+                          />
+                        ]}
+                      >
+                        <Row gutter={8} style={{ width: '100%' }}>
+                          <Col span={6}>
+                            <Input
+                              placeholder={t('variants.variantName')}
+                              value={variant.variant_name}
+                              onChange={(e) => handleQuickVariantChange(variant.id, 'variant_name', e.target.value)}
+                              size="small"
+                            />
+                          </Col>
+                          <Col span={4}>
+                            <Input
+                              placeholder={t('variants.color')}
+                              value={variant.color}
+                              onChange={(e) => handleQuickVariantChange(variant.id, 'color', e.target.value)}
+                              size="small"
+                            />
+                          </Col>
+                          <Col span={4}>
+                            <Input
+                              placeholder={t('variants.size')}
+                              value={variant.size}
+                              onChange={(e) => handleQuickVariantChange(variant.id, 'size', e.target.value)}
+                              size="small"
+                            />
+                          </Col>
+                          <Col span={4}>
+                            <InputNumber
+                              placeholder={t('variants.currentStock')}
+                              value={variant.current_stock}
+                              onChange={(value) => handleQuickVariantChange(variant.id, 'current_stock', value || 0)}
+                              size="small"
+                              min={0}
+                              style={{ width: '100%' }}
+                            />
+                          </Col>
+                          <Col span={3}>
+                            <Switch
+                              size="small"
+                              checked={variant.is_active}
+                              onChange={(checked) => handleQuickVariantChange(variant.id, 'is_active', checked)}
+                            />
+                          </Col>
+                        </Row>
+                      </List.Item>
+                    )}
+                  />
+                )}
+                
+                {quickVariants.length > 0 && (
+                  <Tag color="blue" style={{ marginTop: 8 }}>
+                    {t('variants.variantsWillBeCreated', { count: quickVariants.length })}
+                  </Tag>
+                )}
+              </Space>
+            </Form.Item>
+          )}
 
           <Form.Item>
             <Space>

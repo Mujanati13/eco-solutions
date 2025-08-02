@@ -106,25 +106,44 @@ const SessionHistory = () => {
       params.format = selectedExportFormat;
 
       const response = await authService.exportSessions(params);
-      const blob = new Blob([response.data], { 
-        type: selectedExportFormat === 'csv' ? 'text/csv' : 'application/octet-stream' 
-      });
+      
+      // Get the filename from the response headers or create one
+      const contentDisposition = response.headers['content-disposition'];
+      let filename;
+      if (contentDisposition) {
+        filename = contentDisposition.split('filename=')[1].replace(/"/g, '');
+      } else {
+        // Fallback filename based on format
+        switch (selectedExportFormat) {
+          case 'excel':
+            filename = `session_history_${new Date().toISOString().split("T")[0]}.xlsx`;
+            break;
+          case 'pdf':
+            filename = `session_history_${new Date().toISOString().split("T")[0]}.pdf`;
+            break;
+          default:
+            filename = `session_history_${new Date().toISOString().split("T")[0]}.csv`;
+        }
+      }
+
+      // Create blob with appropriate content type
+      let blob;
+      if (selectedExportFormat === 'csv') {
+        blob = new Blob([response.data], { type: 'text/csv' });
+      } else if (selectedExportFormat === 'excel') {
+        blob = new Blob([response.data], { 
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+      } else if (selectedExportFormat === 'pdf') {
+        blob = new Blob([response.data], { type: 'application/pdf' });
+      } else {
+        blob = new Blob([response.data], { type: 'text/csv' });
+      }
+
+      // Create and trigger download
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      
-      let filename;
-      switch (selectedExportFormat) {
-        case 'excel':
-          filename = `session_history_${new Date().toISOString().split("T")[0]}.xlsx`;
-          break;
-        case 'pdf':
-          filename = `session_history_${new Date().toISOString().split("T")[0]}.pdf`;
-          break;
-        default:
-          filename = `session_history_${new Date().toISOString().split("T")[0]}.csv`;
-      }
-      
       link.download = filename;
       document.body.appendChild(link);
       link.click();
@@ -138,6 +157,7 @@ const SessionHistory = () => {
       console.error("Export error:", error);
     } finally {
       setExporting(false);
+      setSelectedExportFormat('csv');
     }
   };
 

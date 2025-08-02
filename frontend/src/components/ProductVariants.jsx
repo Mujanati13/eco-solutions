@@ -29,6 +29,7 @@ import {
   EyeOutlined,
   BarcodeOutlined,
   DollarOutlined,
+  BgColorsOutlined,
   InboxOutlined
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -60,6 +61,73 @@ const ProductVariants = ({ product, visible, onClose }) => {
       fetchVariants();
     }
   }, [visible, product, canViewVariants]);
+
+  // Helper function to get color value for display
+  const getColorValue = (colorName) => {
+    const colorMap = {
+      // Basic colors
+      'red': '#ff4d4f',
+      'rouge': '#ff4d4f',
+      'أحمر': '#ff4d4f',
+      'blue': '#1890ff',
+      'bleu': '#1890ff',
+      'أزرق': '#1890ff',
+      'green': '#52c41a',
+      'vert': '#52c41a',
+      'أخضر': '#52c41a',
+      'yellow': '#fadb14',
+      'jaune': '#fadb14',
+      'أصفر': '#fadb14',
+      'orange': '#fa8c16',
+      'برتقالي': '#fa8c16',
+      'purple': '#722ed1',
+      'violet': '#722ed1',
+      'بنفسجي': '#722ed1',
+      'pink': '#eb2f96',
+      'rose': '#eb2f96',
+      'وردي': '#eb2f96',
+      'black': '#262626',
+      'noir': '#262626',
+      'أسود': '#262626',
+      'white': '#ffffff',
+      'blanc': '#ffffff',
+      'أبيض': '#ffffff',
+      'gray': '#8c8c8c',
+      'grey': '#8c8c8c',
+      'gris': '#8c8c8c',
+      'رمادي': '#8c8c8c',
+      'brown': '#8b4513',
+      'brun': '#8b4513',
+      'بني': '#8b4513',
+      // Additional colors
+      'navy': '#001f3f',
+      'marine': '#001f3f',
+      'cyan': '#13c2c2',
+      'magenta': '#eb2f96',
+      'lime': '#a0d911',
+      'indigo': '#4b0082',
+      'teal': '#008080',
+      'silver': '#c0c0c0',
+      'gold': '#ffd700',
+      'or': '#ffd700',
+      'ذهبي': '#ffd700'
+    };
+
+    const normalizedColor = colorName?.toLowerCase().trim();
+    
+    // Try direct mapping first
+    if (colorMap[normalizedColor]) {
+      return colorMap[normalizedColor];
+    }
+    
+    // Check if it's already a hex color
+    if (normalizedColor?.startsWith('#')) {
+      return normalizedColor;
+    }
+    
+    // Default fallback color
+    return '#d9d9d9';
+  };
 
   const fetchVariants = async () => {
     try {
@@ -118,24 +186,76 @@ const ProductVariants = ({ product, visible, onClose }) => {
 
   const handleSave = async (values) => {
     try {
+      // Clean up form values - convert empty strings to null for numeric fields
+      const cleanedValues = { ...values };
+      
+      // Handle numeric fields
+      if (cleanedValues.weight === '' || cleanedValues.weight === undefined) {
+        cleanedValues.weight = null;
+      }
+      if (cleanedValues.cost_price === '' || cleanedValues.cost_price === undefined) {
+        cleanedValues.cost_price = null;
+      }
+      if (cleanedValues.selling_price === '' || cleanedValues.selling_price === undefined) {
+        cleanedValues.selling_price = null;
+      }
+      
+      // Handle string fields
+      if (cleanedValues.barcode === '' || cleanedValues.barcode === undefined) {
+        cleanedValues.barcode = null;
+      }
+      if (cleanedValues.color === '' || cleanedValues.color === undefined) {
+        cleanedValues.color = null;
+      }
+      if (cleanedValues.size === '' || cleanedValues.size === undefined) {
+        cleanedValues.size = null;
+      }
+      if (cleanedValues.material === '' || cleanedValues.material === undefined) {
+        cleanedValues.material = null;
+      }
+      if (cleanedValues.dimensions === '' || cleanedValues.dimensions === undefined) {
+        cleanedValues.dimensions = null;
+      }
+
       // Validate variant data
-      const errors = variantService.validateVariant(values);
+      const errors = variantService.validateVariant(cleanedValues);
       if (errors.length > 0) {
         message.error(errors.join(', '));
         return;
       }
 
       if (editingVariant) {
-        await variantService.updateVariant(editingVariant.id, values);
+        await variantService.updateVariant(editingVariant.id, cleanedValues);
         message.success(t('common.success.updated'));
       } else {
-        await variantService.createVariant(values);
+        await variantService.createVariant(cleanedValues);
         message.success(t('common.success.created'));
       }
       setModalVisible(false);
       fetchVariants();
     } catch (error) {
-      message.error(error.message || t('common.error.saveFailed'));
+      console.error('Variant save error:', error);
+      
+      // Handle different types of errors
+      if (error && typeof error === 'object') {
+        if (error.details && Array.isArray(error.details)) {
+          // Validation error with details
+          const errorMessages = error.details.map(detail => 
+            `${detail.field}: ${detail.message}`
+          );
+          message.error(`Validation Error: ${errorMessages.join(', ')}`);
+        } else if (error.message) {
+          message.error(error.message);
+        } else if (error.error) {
+          message.error(error.error);
+        } else {
+          message.error(t('common.error.saveFailed'));
+        }
+      } else if (typeof error === 'string') {
+        message.error(error);
+      } else {
+        message.error(t('common.error.saveFailed'));
+      }
     }
   };
 
@@ -153,12 +273,48 @@ const ProductVariants = ({ product, visible, onClose }) => {
       dataIndex: 'variant_name',
       key: 'variant_name',
       render: (text, record) => (
-        <Space>
-          <Text strong>{text}</Text>
-          {record.color && <Tag color={record.color}>{record.color}</Tag>}
-          {record.size && <Tag>{record.size}</Tag>}
+        <Space direction="vertical" size="small">
+          <Text strong>{text || `${record.color || ''} ${record.size || ''}`.trim()}</Text>
+          <Space size="small">
+            {record.size && (
+              <Tag color="green">
+                {record.size}
+              </Tag>
+            )}
+          </Space>
         </Space>
       ),
+    },
+    {
+      title: t('variants.color'),
+      dataIndex: 'color',
+      key: 'color',
+      width: 120,
+      render: (color) => {
+        if (!color) return <Text type="secondary">-</Text>;
+        
+        // Get color value for display
+        const colorValue = getColorValue(color);
+        
+        return (
+          <Space>
+            <div
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 4,
+                backgroundColor: colorValue,
+                border: '1px solid #d9d9d9',
+                display: 'inline-block',
+                marginRight: 4
+              }}
+            />
+            <Tag color="blue" icon={<BgColorsOutlined />}>
+              {color}
+            </Tag>
+          </Space>
+        );
+      },
     },
     {
       title: t('variants.sku'),
@@ -383,6 +539,24 @@ const ProductVariants = ({ product, visible, onClose }) => {
                   precision={2}
                   style={{ width: '100%' }}
                   placeholder="0.00"
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="current_stock"
+                label={t('variants.currentStock')}
+                rules={[
+                  { required: true, message: t('variants.currentStockRequired') }
+                ]}
+              >
+                <InputNumber
+                  min={0}
+                  style={{ width: '100%' }}
+                  placeholder="0"
                 />
               </Form.Item>
             </Col>

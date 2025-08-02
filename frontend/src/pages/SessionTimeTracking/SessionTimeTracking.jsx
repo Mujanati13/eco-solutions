@@ -18,14 +18,15 @@ import {
   Empty,
 } from "antd";
 import {
-  DownloadOutlined,
   ReloadOutlined,
   UserOutlined,
   ClockCircleOutlined,
   CalendarOutlined,
   EyeOutlined,
   TrophyOutlined,
+  DownloadOutlined,
 } from "@ant-design/icons";
+import * as XLSX from 'xlsx';
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -191,21 +192,6 @@ const SessionTimeTracking = () => {
     }
   };
 
-  const handleExport = async () => {
-    try {
-      const startDate = dateRange[0] || sessionTimeService.getTodayDate();
-      const endDate = dateRange[1] || sessionTimeService.getTodayDate();
-      // Employee can only export their own data, Admin can export selected user or all
-      const userId = isAdmin ? selectedUser : user.id;
-
-      await sessionTimeService.exportSessionData(startDate, endDate, userId);
-      message.success(t("common.sessionDataExported"));
-    } catch (error) {
-      console.error("Error exporting session data:", error);
-      message.error(t("common.failedToFetch"));
-    }
-  };
-
   const handleRefresh = () => {
     if (dateRange.length > 0) {
       // Since dateRange contains strings, we need to handle the refresh differently
@@ -245,6 +231,87 @@ const SessionTimeTracking = () => {
     }
     if (isAdmin) {
       fetchActiveSessions();
+    }
+  };
+
+  const handleExportExcel = () => {
+    if (!sessionData || sessionData.length === 0) {
+      message.warning(t("common.noDataToExport"));
+      return;
+    }
+
+    try {
+      // Prepare data for export
+      const dataToExport = groupBy !== "none" 
+        ? groupSessionsByDate(sessionData, groupBy)
+        : sessionData;
+
+      const exportData = dataToExport.map((record, index) => {
+        if (groupBy !== "none") {
+          // Grouped data
+          return {
+            [t("sessionTime.date")]: formatGroupDate(record.date, groupBy),
+            [t("sessionTime.user")]: record.userInfo 
+              ? `${record.userInfo.first_name} ${record.userInfo.last_name}`
+              : "Multiple Users",
+            [t("sessionTime.totalTime")]: sessionTimeService.formatSessionTime(record.totalTime),
+            [t("sessionTime.sessions")]: record.totalSessions,
+            [t("sessionTime.productivity")]: `${sessionTimeService.calculateProductivity(record.totalTime).toFixed(1)}%`,
+          };
+        } else {
+          // Individual session data
+          return {
+            [t("sessionTime.date")]: new Date(record.date).toLocaleDateString(),
+            ...(isAdmin && !selectedUser && {
+              [t("sessionTime.user")]: `${record.first_name} ${record.last_name}`,
+            }),
+            [t("sessionTime.totalTime")]: sessionTimeService.formatSessionTime(record.total_session_time),
+            [t("sessionTime.sessions")]: record.session_count,
+            [t("sessionTime.firstLogin")]: sessionTimeService.formatTime(record.first_login),
+            [t("sessionTime.lastLogout")]: sessionTimeService.formatTime(record.last_logout),
+            [t("sessionTime.productivity")]: `${sessionTimeService.calculateProductivity(record.total_session_time).toFixed(1)}%`,
+          };
+        }
+      });
+
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(exportData);
+
+      // Auto-fit column widths
+      const maxWidth = 50;
+      const colWidths = Object.keys(exportData[0] || {}).map(key => ({
+        wch: Math.min(
+          Math.max(
+            key.length,
+            ...exportData.map(row => String(row[key] || '').length)
+          ),
+          maxWidth
+        )
+      }));
+      ws['!cols'] = colWidths;
+
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, t("sessionTime.sessionData"));
+
+      // Generate filename
+      const dateRangeStr = dateRange.length > 0 
+        ? `_${dateRange[0]}_to_${dateRange[1]}`
+        : `_${new Date().toISOString().split('T')[0]}`;
+      
+      const userStr = isAdmin && selectedUser 
+        ? `_${activeUsers.find(u => u.userId === selectedUser)?.userInfo?.first_name || 'user'}`
+        : '';
+
+      const filename = `session_data${dateRangeStr}${userStr}.xlsx`;
+
+      // Save file
+      XLSX.writeFile(wb, filename);
+      
+      message.success(t("common.exportSuccess"));
+    } catch (error) {
+      console.error("Export error:", error);
+      message.error(t("common.exportFailed"));
     }
   };
 
@@ -723,10 +790,10 @@ const SessionTimeTracking = () => {
               </Button>
               <Button
                 icon={<DownloadOutlined />}
-                onClick={handleExport}
-                disabled={sessionData.length === 0}
+                onClick={handleExportExcel}
+                disabled={!sessionData || sessionData.length === 0}
               >
-                {t("common.export")}
+                {t("common.exportExcel")}
               </Button>
             </Space>
           </Col>

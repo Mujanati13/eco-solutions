@@ -26,6 +26,7 @@ import Categories from './pages/Categories/Categories'
 import GoogleSheets from './pages/Integrations/GoogleSheets'
 import EcotrackIntegration from './pages/Integrations/EcotrackIntegration'
 import DeliveryPricing from './pages/DeliveryPricing'
+import ProductDisplay from './pages/ProductDisplay/ProductDisplay'
 // import ThemeShowcase from './components/ThemeShowcase'
 import { ecoSTheme } from './styles/theme'
 import './App.css'
@@ -42,6 +43,7 @@ function App() {
             {/* Public routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/product/:token" element={<ProductDisplay />} />
             
             {/* Protected routes */}
             <Route

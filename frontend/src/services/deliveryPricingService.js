@@ -2,8 +2,9 @@ import api from './api';
 
 export const deliveryPricingService = {
   // Get all wilayas with their delivery pricing
-  getAllWilayasWithPricing: async () => {
-    const response = await api.get('/delivery-pricing/wilayas');
+  getAllWilayasWithPricing: async (statusFilter = null) => {
+    const params = statusFilter ? { status: statusFilter } : {};
+    const response = await api.get('/delivery-pricing/wilayas', { params });
     return response.data;
   },
 

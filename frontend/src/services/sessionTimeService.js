@@ -50,36 +50,39 @@ export const sessionTimeService = {
     return api.post(`/sessions/update-summary/${userId}`).then(response => response.data);
   },
 
-  // Export session data to CSV
-  exportSessionData: async (startDate, endDate, userId = null) => {
+  // Export session data in various formats
+  exportSessionData: async (startDate, endDate, userId = null, format = 'csv') => {
     try {
+      // Use the route with optional userId parameter
       const url = userId 
-        ? `/sessions/export/${startDate}/${endDate}/${userId}` 
-        : `/sessions/export/${startDate}/${endDate}`;
+        ? `/sessions/export/${startDate}/${endDate}/${userId}?format=${format}` 
+        : `/sessions/export/${startDate}/${endDate}?format=${format}`;
       
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}${url}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+      const response = await api.get(url, {
+        responseType: 'blob'
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to export session data');
-      }
-
-      // Get the filename from the response headers
-      const contentDisposition = response.headers.get('content-disposition');
+      // Get the filename from the response headers or create one
+      const contentDisposition = response.headers['content-disposition'];
       const filename = contentDisposition 
         ? contentDisposition.split('filename=')[1].replace(/"/g, '') 
-        : `session-data-${startDate}-to-${endDate}.csv`;
+        : `session-data-${startDate}-to-${endDate}.${format === 'excel' ? 'xlsx' : format === 'pdf' ? 'pdf' : 'csv'}`;
 
-      // Get the CSV content
-      const csvContent = await response.text();
+      // Create blob with appropriate content type
+      let blob;
+      if (format === 'csv') {
+        blob = new Blob([response.data], { type: 'text/csv' });
+      } else if (format === 'excel') {
+        blob = new Blob([response.data], { 
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+      } else if (format === 'pdf') {
+        blob = new Blob([response.data], { type: 'application/pdf' });
+      } else {
+        blob = new Blob([response.data], { type: 'text/csv' });
+      }
 
       // Create and trigger download
-      const blob = new Blob([csvContent], { type: 'text/csv' });
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = downloadUrl;

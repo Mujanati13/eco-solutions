@@ -27,7 +27,15 @@ const variantService = {
       const response = await api.post('/variants', variantData);
       return response.data;
     } catch (error) {
-      throw error.response?.data || error.message;
+      console.error('Create variant error:', error);
+      // Preserve the error structure for better error handling
+      if (error.response?.data) {
+        throw error.response.data;
+      } else if (error.message) {
+        throw { message: error.message };
+      } else {
+        throw { message: 'Failed to create variant' };
+      }
     }
   },
 
@@ -37,7 +45,15 @@ const variantService = {
       const response = await api.put(`/variants/${id}`, variantData);
       return response.data;
     } catch (error) {
-      throw error.response?.data || error.message;
+      console.error('Update variant error:', error);
+      // Preserve the error structure for better error handling
+      if (error.response?.data) {
+        throw error.response.data;
+      } else if (error.message) {
+        throw { message: error.message };
+      } else {
+        throw { message: 'Failed to update variant' };
+      }
     }
   },
 
@@ -47,7 +63,15 @@ const variantService = {
       const response = await api.delete(`/variants/${id}`);
       return response.data;
     } catch (error) {
-      throw error.response?.data || error.message;
+      console.error('Delete variant error:', error);
+      // Preserve the error structure for better error handling
+      if (error.response?.data) {
+        throw error.response.data;
+      } else if (error.message) {
+        throw { message: error.message };
+      } else {
+        throw { message: 'Failed to delete variant' };
+      }
     }
   },
 

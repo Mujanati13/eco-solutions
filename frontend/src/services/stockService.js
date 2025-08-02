@@ -167,6 +167,16 @@ class StockService {
       throw error.response?.data || error
     }
   }
+
+  // Product Link Generation
+  async generateProductLink(productId) {
+    try {
+      const response = await api.post(`/stock/products/${productId}/generate-link`)
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error
+    }
+  }
 }
 
 export default new StockService()

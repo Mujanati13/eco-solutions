@@ -129,16 +129,12 @@ const PerformanceReports = () => {
           filename = `performance_report_${new Date().toISOString().split("T")[0]}.csv`;
           break;
         case 'excel':
-          // For now, we'll use CSV format but with .xlsx extension
-          // You can implement actual Excel export later
-          response = await performanceService.exportReports({ ...params, format: 'csv' });
+          response = await performanceService.exportReports({ ...params, format: 'excel' });
           mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
           filename = `performance_report_${new Date().toISOString().split("T")[0]}.xlsx`;
           break;
         case 'pdf':
-          // For now, we'll use CSV format but note that PDF export needs special handling
-          // You can implement actual PDF export later
-          response = await performanceService.exportReports({ ...params, format: 'csv' });
+          response = await performanceService.exportReports({ ...params, format: 'pdf' });
           mimeType = "application/pdf";
           filename = `performance_report_${new Date().toISOString().split("T")[0]}.pdf`;
           break;

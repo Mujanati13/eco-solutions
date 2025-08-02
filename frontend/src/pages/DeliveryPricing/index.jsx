@@ -53,6 +53,7 @@ const DeliveryPricing = () => {
   const [selectedWilaya, setSelectedWilaya] = useState(null);
   const [selectedPricing, setSelectedPricing] = useState(null);
   const [stats, setStats] = useState({});
+  const [statusFilter, setStatusFilter] = useState(''); // Add status filter state
   const [form] = Form.useForm();
   const [createForm] = Form.useForm();
 
@@ -60,11 +61,15 @@ const DeliveryPricing = () => {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    fetchData();
+  }, [statusFilter]); // Refetch when status filter changes
+
   const fetchData = async () => {
     try {
       setLoading(true);
       const [wilayasResponse, statsResponse] = await Promise.all([
-        deliveryPricingService.getAllWilayasWithPricing(),
+        deliveryPricingService.getAllWilayasWithPricing(statusFilter || null),
         deliveryPricingService.getDeliveryPricingStats()
       ]);
       
@@ -165,7 +170,8 @@ const DeliveryPricing = () => {
     const colors = {
       home: 'blue',
       office: 'green',
-      pickup_point: 'orange'
+      pickup_point: 'orange',
+      les_changes: 'purple'
     };
     return colors[type] || 'default';
   };
@@ -174,7 +180,8 @@ const DeliveryPricing = () => {
     const icons = {
       home: <HomeOutlined style={{ color: '#1890ff' }} />,
       office: <BankOutlined style={{ color: '#52c41a' }} />,
-      pickup_point: <ShopOutlined style={{ color: '#fa8c16' }} />
+      pickup_point: <ShopOutlined style={{ color: '#fa8c16' }} />,
+      les_changes: <span style={{ color: '#722ed1' }}>🔄</span>
     };
     return icons[type] || <TruckOutlined />;
   };
@@ -340,15 +347,52 @@ const DeliveryPricing = () => {
         </Col>
       </Row>
 
-      {/* Info Alert */}
-      <Alert
-        message={t('delivery.info')}
-        description={t('delivery.infoDescription')}
-        type="info"
-        showIcon
-        style={{ marginBottom: '24px' }}
-        closable
-      />
+      {/* Info Alert with Filter */}
+      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+        <Col xs={24} lg={18}>
+          <Alert
+            message={t('delivery.info')}
+            description={t('delivery.infoDescription')}
+            type="info"
+            showIcon
+            closable
+          />
+        </Col>
+        <Col xs={24} lg={6}>
+          <Card size="small">
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Text strong>{t('delivery.filterByStatus')}</Text>
+              <Select
+                value={statusFilter}
+                onChange={setStatusFilter}
+                style={{ width: '100%' }}
+                size="large"
+                placeholder={t('delivery.selectStatus')}
+                allowClear
+              >
+                <Option value="">
+                  <Space>
+                    <Badge status="processing" />
+                    {t('delivery.allWilayas')}
+                  </Space>
+                </Option>
+                <Option value="active">
+                  <Space>
+                    <Badge status="success" />
+                    {t('delivery.activeWilayas')}
+                  </Space>
+                </Option>
+                <Option value="inactive">
+                  <Space>
+                    <Badge status="error" />
+                    {t('delivery.inactiveWilayas')}
+                  </Space>
+                </Option>
+              </Select>
+            </Space>
+          </Card>
+        </Col>
+      </Row>
 
       {/* Main Table */}
       <Card>
@@ -362,8 +406,11 @@ const DeliveryPricing = () => {
             pageSize: 15,
             showSizeChanger: true,
             showQuickJumper: true,
-            showTotal: (total, range) => 
-              t('common.pagination', { start: range[0], end: range[1], total }),
+            showTotal: (total, range) => {
+              const filterText = statusFilter ? 
+                ` (${t(`delivery.${statusFilter}Wilayas`)} ${t('delivery.filtered')})` : '';
+              return t('common.pagination', { start: range[0], end: range[1], total }) + filterText;
+            },
             responsive: true
           }}
           scroll={{ x: 600 }}
@@ -681,6 +728,9 @@ const DeliveryPricing = () => {
               </Option>
               <Option value="pickup_point">
                 <ShopOutlined /> {t('delivery.types.pickup_point')}
+              </Option>
+              <Option value="les_changes">
+                🔄 Les Changes
               </Option>
             </Select>
           </Form.Item>

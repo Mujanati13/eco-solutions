@@ -23,6 +23,7 @@ import {
   ClockCircleOutlined,
   CheckCircleOutlined,
   DeliveredProcedureOutlined,
+  CloseCircleOutlined,
   UserOutlined,
   UploadOutlined,
   ShareAltOutlined,
@@ -580,8 +581,8 @@ const Dashboard = React.memo(() => {
     <div>
       {/* Order Statistics Cards */}
       <Row gutter={[16, 16]} className="dashboard-stats" style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={12} md={12} lg={6} xl={6}>
-          <Card className="dashboard-card" style={{ borderTop: '4px solid #1890ff' }}>
+        <Col xs={24} sm={12} md={12} lg={8} xl={8} xxl={4}>
+          <Card className="dashboard-card" style={{ borderTop: '4px solid #1890ff', height: '100%' }}>
             <Statistic
               title={hasPermission('canViewAllOrders') ? t('dashboard.totalOrders') : t('dashboard.myOrders')}
               value={hasPermission('canViewAllOrders') ? (stats.totalOrders || stats.total_orders || 0) : (stats.my_orders || 0)}
@@ -590,8 +591,8 @@ const Dashboard = React.memo(() => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={12} lg={6} xl={6}>
-          <Card className="dashboard-card" style={{ borderTop: '4px solid #fa8c16' }}>
+        <Col xs={24} sm={12} md={12} lg={8} xl={8} xxl={4}>
+          <Card className="dashboard-card" style={{ borderTop: '4px solid #fa8c16', height: '100%' }}>
             <Statistic
               title={hasPermission('canViewAllOrders') ? t('dashboard.pendingOrders') : t('dashboard.myPendingOrders')}
               value={hasPermission('canViewAllOrders') ? (stats.pendingOrders || stats.pending_orders || 0) : (stats.my_pending_orders || 0)}
@@ -600,8 +601,8 @@ const Dashboard = React.memo(() => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={12} lg={6} xl={6}>
-          <Card className="dashboard-card" style={{ borderTop: '4px solid #52c41a' }}>
+        <Col xs={24} sm={12} md={12} lg={8} xl={8} xxl={4}>
+          <Card className="dashboard-card" style={{ borderTop: '4px solid #52c41a', height: '100%' }}>
             <Statistic
               title={hasPermission('canViewAllOrders') ? t('dashboard.confirmedOrders') : t('dashboard.myConfirmedOrders')}
               value={hasPermission('canViewAllOrders') ? (stats.confirmedOrders || stats.confirmed_orders || 0) : (stats.my_confirmed_orders || 0)}
@@ -610,8 +611,8 @@ const Dashboard = React.memo(() => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={12} lg={6} xl={6}>
-          <Card className="dashboard-card" style={{ borderTop: '4px solid #722ed1' }}>
+        <Col xs={24} sm={12} md={12} lg={8} xl={8} xxl={4}>
+          <Card className="dashboard-card" style={{ borderTop: '4px solid #722ed1', height: '100%' }}>
             <Statistic
               title={hasPermission('canViewAllOrders') ? t('dashboard.deliveredOrders') : t('dashboard.myDeliveredOrders')}
               value={hasPermission('canViewAllOrders') ? (stats.deliveredOrders || stats.delivered_orders || 0) : (stats.my_delivered_orders || 0)}
@@ -620,6 +621,29 @@ const Dashboard = React.memo(() => {
             />
           </Card>
         </Col>
+        <Col xs={24} sm={12} md={12} lg={8} xl={8} xxl={4}>
+          <Card className="dashboard-card" style={{ borderTop: '4px solid #ff4d4f', height: '100%' }}>
+            <Statistic
+              title={hasPermission('canViewAllOrders') ? t('dashboard.cancelledOrders') : t('dashboard.myCancelledOrders')}
+              value={hasPermission('canViewAllOrders') ? (stats.cancelledOrders || stats.cancelled_orders || 0) : (stats.my_cancelled_orders || 0)}
+              prefix={<CloseCircleOutlined />}
+              valueStyle={{ color: '#ff4d4f', fontSize: '1.5em', fontWeight: 'bold' }}
+            />
+          </Card>
+        </Col>
+        {hasPermission('canViewAllOrders') && (
+          <Col xs={24} sm={12} md={12} lg={8} xl={8} xxl={4}>
+            <Card className="dashboard-card" style={{ borderTop: '4px solid #13c2c2', height: '100%' }}>
+              <Statistic
+                title={t('dashboard.totalRevenue')}
+                value={stats.totalRevenue || 0}
+                prefix={<DollarOutlined />}
+                valueStyle={{ color: '#13c2c2', fontSize: '1.5em', fontWeight: 'bold' }}
+                suffix="DA"
+              />
+            </Card>
+          </Col>
+        )}
       </Row>
 
       {/* Employee Message - Only shown to employees */}

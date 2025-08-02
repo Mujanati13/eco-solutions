@@ -23,6 +23,7 @@ import {
   ClockCircleOutlined,
   CheckCircleOutlined,
   DeliveredProcedureOutlined,
+  CloseCircleOutlined,
   UserOutlined,
   UploadOutlined,
   DownloadOutlined,
@@ -371,7 +372,7 @@ const Dashboard = () => {
     <div>
       {/* Order Statistics Cards */}
       <Row gutter={[16, 16]} className="dashboard-stats" style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={12} md={12} lg={6} xl={6}>
+        <Col xs={24} sm={12} md={8} lg={4} xl={4}>
           <Card className="dashboard-card">
             <Statistic
               title={isAdmin ? t('dashboard.totalOrders') : t('dashboard.myOrders')}
@@ -381,7 +382,7 @@ const Dashboard = () => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={12} lg={6} xl={6}>
+        <Col xs={24} sm={12} md={8} lg={4} xl={4}>
           <Card className="dashboard-card">
             <Statistic
               title={isAdmin ? t('dashboard.pendingOrders') : t('dashboard.myPendingOrders')}
@@ -391,7 +392,7 @@ const Dashboard = () => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={12} lg={6} xl={6}>
+        <Col xs={24} sm={12} md={8} lg={4} xl={4}>
           <Card className="dashboard-card">
             <Statistic
               title={isAdmin ? t('dashboard.confirmedOrders') : t('dashboard.myConfirmedOrders')}
@@ -401,13 +402,23 @@ const Dashboard = () => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={12} lg={6} xl={6}>
+        <Col xs={24} sm={12} md={8} lg={4} xl={4}>
           <Card className="dashboard-card">
             <Statistic
               title={isAdmin ? t('dashboard.deliveredOrders') : t('dashboard.myDeliveredOrders')}
               value={isAdmin ? (stats.deliveredOrders || stats.delivered_orders || 0) : (stats.my_delivered_orders || 0)}
               prefix={<DeliveredProcedureOutlined />}
               valueStyle={{ color: '#722ed1', fontSize: '1.2em' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={8} lg={4} xl={4}>
+          <Card className="dashboard-card">
+            <Statistic
+              title={isAdmin ? t('dashboard.cancelledOrders') : t('dashboard.myCancelledOrders')}
+              value={isAdmin ? (stats.cancelledOrders || stats.cancelled_orders || 0) : (stats.my_cancelled_orders || 0)}
+              prefix={<CloseCircleOutlined />}
+              valueStyle={{ color: '#ff4d4f', fontSize: '1.2em' }}
             />
           </Card>
         </Col>

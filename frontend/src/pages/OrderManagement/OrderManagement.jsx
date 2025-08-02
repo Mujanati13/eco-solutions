@@ -102,6 +102,9 @@ const OrderManagement = () => {
   const [loadingWilayas, setLoadingWilayas] = useState(false);
   const [loadingBaladias, setLoadingBaladias] = useState(false);
   const [loadingDeliveryPrice, setLoadingDeliveryPrice] = useState(false);
+  
+  // Final total calculation state
+  const [finalTotal, setFinalTotal] = useState(0);
 
   // Product and stock tracking state
   const [products, setProducts] = useState([]);
@@ -262,7 +265,7 @@ const OrderManagement = () => {
 
       const pricingData = {
         wilaya_id,
-        delivery_type: delivery_type || "domicile",
+        delivery_type: delivery_type || "home",
         weight: weight || 1,
         volume: volume || 1,
         pricing_level: baladia_id ? "baladia" : "wilaya", // Auto-determine based on baladia selection
@@ -280,6 +283,11 @@ const OrderManagement = () => {
         const deliveryPrice =
           response.data.delivery_price || response.data.price || 0;
         form.setFieldsValue({ delivery_price: deliveryPrice });
+        
+        // Update final total after delivery price is set
+        setTimeout(() => {
+          updateFinalTotal();
+        }, 100);
       }
     } catch (error) {
       console.error("Error calculating delivery price:", error);
@@ -293,6 +301,7 @@ const OrderManagement = () => {
     // Debounce the calculation
     setTimeout(() => {
       calculateDeliveryPrice();
+      updateFinalTotal(); // Also update final total when delivery fields change
     }, 500);
   };
 
@@ -301,6 +310,11 @@ const OrderManagement = () => {
     fetchWilayas();
     fetchProducts();
   }, []);
+
+  // Update final total when form values change
+  useEffect(() => {
+    updateFinalTotal();
+  }, [form]);
 
   const fetchProducts = async () => {
     try {
@@ -335,8 +349,12 @@ const OrderManagement = () => {
             name: product.name,
             unit_price: product.selling_price,
             category: product.category_name || ''
-          }
+          },
+          total_amount: product.selling_price.toFixed(2) // Set total_amount to unit price (this is now the main price field)
         });
+        
+        // Update calculations
+        setTimeout(() => updateProductTotal(), 100);
         
         // Show stock warning if low
         if (product.current_stock <= 5) {
@@ -348,6 +366,39 @@ const OrderManagement = () => {
     } catch (error) {
       console.error("Error handling product selection:", error);
     }
+  };
+
+  const updateProductTotal = () => {
+    // Get the unit price from total_amount field (which now represents unit price)
+    const formValues = form.getFieldsValue();
+    const quantity = parseFloat(formValues.product_info?.quantity || 0);
+    const unitPrice = parseFloat(formValues.total_amount || 0);
+    const productTotal = quantity * unitPrice;
+    
+    // Update the total_price field for internal calculations and ensure unit_price is synced
+    form.setFieldsValue({
+      product_info: {
+        ...formValues.product_info,
+        total_price: productTotal.toFixed(2),
+        unit_price: unitPrice // Keep unit_price synced for backend compatibility
+      }
+    });
+
+    // Update final total calculation
+    updateFinalTotal();
+  };
+
+  const updateFinalTotal = () => {
+    // Get current form values
+    const formValues = form.getFieldsValue();
+    const quantity = parseFloat(formValues.product_info?.quantity || 0);
+    const unitPrice = parseFloat(formValues.total_amount || 0); // total_amount now represents unit price
+    const productTotal = quantity * unitPrice;
+    const deliveryPrice = parseFloat(formValues.delivery_price || 0);
+    const calculatedFinalTotal = productTotal + deliveryPrice;
+    
+    // Update final total state
+    setFinalTotal(calculatedFinalTotal);
   };
 
   const handleCreateOrder = async (values) => {
@@ -1229,6 +1280,11 @@ const OrderManagement = () => {
                 product_info: productInfo,
               });
               setModalVisible(true);
+              
+              // Update final total after form is populated
+              setTimeout(() => {
+                updateFinalTotal();
+              }, 100);
             }}
           />
           {ecotrackEnabled && record.ecotrack_tracking_id && (
@@ -1279,25 +1335,6 @@ const OrderManagement = () => {
   return (
     <div className="orders-page">
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={24} style={{ marginBottom: 16 }}>
-          <Card>
-            <Space>
-              <SettingOutlined />
-              <Text strong>{t("tracking.ecotrackSettings")}</Text>
-              <Switch
-                checked={ecotrackEnabled}
-                onChange={setEcotrackEnabled}
-                checkedChildren={t("common.enabled")}
-                unCheckedChildren={t("common.disabled")}
-              />
-              <Text type="secondary">
-                {ecotrackEnabled
-                  ? t("tracking.ecotrackEnabledDesc")
-                  : t("tracking.ecotrackDisabledDesc")}
-              </Text>
-            </Space>
-          </Card>
-        </Col>
         {isAdmin && (
           <>
             <Col xs={24} sm={12} md={8} lg={6}>
@@ -1428,6 +1465,9 @@ const OrderManagement = () => {
                     setEditingOrder(null);
                     form.resetFields();
                     setModalVisible(true);
+                    
+                    // Reset final total for new order
+                    setFinalTotal(0);
                   }}
                   icon={<PlusOutlined />}
                 ></Button>
@@ -1597,13 +1637,30 @@ const OrderManagement = () => {
                 <Form.Item
                   name="delivery_type"
                   label={t("delivery.deliveryType")}
-                  initialValue="domicile"
+                  initialValue="home"
+                  rules={[
+                    {
+                      required: true,
+                      message: t("delivery.deliveryTypeRequired"),
+                    },
+                  ]}
                 >
-                  <Select>
-                    <Option value="domicile">
-                      {t("delivery.types.domicile")}
+                  <Select 
+                    placeholder={t("delivery.selectType")}
+                    onChange={handleDeliveryFieldChange}
+                  >
+                    <Option value="home">
+                       {t("delivery.types.home")}
                     </Option>
-                    <Option value="desk">{t("delivery.types.desk")}</Option>
+                    <Option value="office">
+                       {t("delivery.types.office")}
+                    </Option>
+                    <Option value="pickup_point">
+                       {t("delivery.types.pickup_point")}
+                    </Option>
+                    <Option value="les_changes">
+                       les changes
+                    </Option>
                   </Select>
                 </Form.Item>
               </Col>
@@ -1646,8 +1703,20 @@ const OrderManagement = () => {
               >
                 <Input
                   type="number"
+                  min={0}
                   suffix="DA"
-                  onChange={handleDeliveryFieldChange}
+                  placeholder="0"
+                  onChange={(e) => {
+                    const unitPrice = parseFloat(e.target.value || 0);
+                    // Update the unit_price in product_info for backend compatibility
+                    form.setFieldsValue({
+                      product_info: {
+                        ...form.getFieldValue('product_info'),
+                        unit_price: unitPrice
+                      }
+                    });
+                    updateProductTotal();
+                  }}
                 />
               </Form.Item>
             </Col>
@@ -1664,15 +1733,23 @@ const OrderManagement = () => {
                   marginBottom: 16,
                 }}
               >
-                <Form.Item dependencies={["total_amount", "delivery_price"]}>
+                <Form.Item dependencies={["total_amount", "delivery_price", ["product_info", "quantity"]]} noStyle>
                   {({ getFieldValue }) => {
-                    const totalAmount = parseFloat(
+                    // Calculate product total from quantity × unit price (total_amount now represents unit price)
+                    const quantity = parseFloat(
+                      getFieldValue(["product_info", "quantity"]) || 0
+                    );
+                    const unitPrice = parseFloat(
                       getFieldValue("total_amount") || 0
                     );
+                    const productTotal = quantity * unitPrice;
                     const deliveryPrice = parseFloat(
                       getFieldValue("delivery_price") || 0
                     );
-                    const finalTotal = totalAmount + deliveryPrice;
+                    const calculatedTotal = productTotal + deliveryPrice;
+                    
+                    // Use the state final total if it's been calculated, otherwise use calculated total
+                    const displayTotal = finalTotal > 0 ? finalTotal : calculatedTotal;
 
                     return (
                       <Row justify="space-between" align="middle">
@@ -1689,7 +1766,7 @@ const OrderManagement = () => {
                               color: "#1890ff",
                             }}
                           >
-                            {finalTotal.toFixed(2)} DA
+                            {displayTotal.toFixed(2)} DA
                           </Text>
                         </Col>
                       </Row>
@@ -1744,35 +1821,24 @@ const OrderManagement = () => {
                     />
                   </Form.Item>
                 </Col>
-                <Col span={6}>
+                <Col span={4}>
                   <Form.Item
                     name={['product_info', 'quantity']}
-                    label={t("orders.productQuantity")}
+                    label={t("orders.quantity")}
                     style={{ marginBottom: 8 }}
+                    initialValue={1}
                   >
                     <Input 
                       type="number" 
                       min={1} 
+                      defaultValue={1}
                       placeholder="1"
                       max={productStock || undefined}
+                      onChange={() => updateProductTotal()}
                     />
                   </Form.Item>
                 </Col>
-                <Col span={6}>
-                  <Form.Item
-                    name={['product_info', 'unit_price']}
-                    label={t("orders.unitPrice")}
-                    style={{ marginBottom: 8 }}
-                  >
-                    <Input 
-                      type="number" 
-                      min={0} 
-                      suffix="DA" 
-                      placeholder="0"
-                      disabled={selectedProduct}
-                    />
-                  </Form.Item>
-                </Col>
+                <Col span={4}></Col>
                 {selectedProduct && (
                   <Col span={12}>
                     <Card 
