@@ -22,6 +22,7 @@ import Products from './pages/Stock/Products'
 import StockLevels from './pages/Stock/StockLevels'
 import StockMovements from './pages/Stock/StockMovements'
 import StockLocations from './pages/Stock/StockLocations'
+import StockCategories from './pages/Stock/Categories'
 import Categories from './pages/Categories/Categories'
 import GoogleSheets from './pages/Integrations/GoogleSheets'
 import EcotrackIntegration from './pages/Integrations/EcotrackIntegration'
@@ -88,7 +89,7 @@ function App() {
             } />
             <Route path="stock/categories" element={
               <PermissionRoute permission="canViewProducts">
-                <Categories />
+                <StockCategories />
               </PermissionRoute>
             } />
             <Route path="stock/levels" element={
@@ -113,11 +114,12 @@ function App() {
                 <GoogleSheets />
               </PermissionRoute>
             } />
-            <Route path="integrations/ecotrack" element={
+            {/* Ecotrack Integration - DISABLED */}
+            {/* <Route path="integrations/ecotrack" element={
               <PermissionRoute permission="canViewIntegrations">
                 <EcotrackIntegration />
               </PermissionRoute>
-            } />
+            } /> */}
             
             {/* Delivery Pricing Management */}
             <Route path="delivery-pricing" element={

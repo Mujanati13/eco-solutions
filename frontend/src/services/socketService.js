@@ -22,19 +22,37 @@ class SocketService {
       return;
     }
 
-    // Get socket URL from environment variables
-    const serverUrl = import.meta.env.VITE_SOCKET_URL || 
-                      import.meta.env.VITE_API_BASE_URL || 
-                      'http://localhost:3000';
+    // Get socket URL from environment variables or fallback to API base URL
+    let serverUrl = import.meta.env.VITE_SOCKET_URL || 
+                    import.meta.env.VITE_API_BASE_URL;
+    
+    // If no environment variables, try to construct from current location
+    if (!serverUrl) {
+      const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const hostname = window.location.hostname;
+      const port = import.meta.env.VITE_API_PORT || '5000';
+      
+      // For localhost development
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        serverUrl = `${protocol}//${hostname}:${port}`;
+      } else {
+        // For production/VPS deployment
+        serverUrl = `${protocol}//${hostname}`;
+      }
+    }
 
-    console.log('Connecting to Socket.IO server...');
+    console.log('Connecting to Socket.IO server at:', serverUrl);
 
     this.socket = io(serverUrl, {
       autoConnect: true,
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 5,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 10,
       timeout: 20000,
+      transports: ['websocket', 'polling'],
+      upgrade: true,
+      rememberUpgrade: true
     });
 
     this.setupEventHandlers();

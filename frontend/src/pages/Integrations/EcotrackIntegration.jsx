@@ -251,13 +251,7 @@ const EcotrackIntegration = () => {
                       </Space>
                     }
                     name="userGuid"
-                    rules={[
-                      { required: true, message: t('ecotrack.userGuidRequired') },
-                      { 
-                        pattern: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-                        message: t('ecotrack.userGuidFormat')
-                      }
-                    ]}
+                   
                   >
                     <Input 
                       placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"

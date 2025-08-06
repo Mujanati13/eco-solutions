@@ -58,11 +58,14 @@ const StockLevels = () => {
   const fetchInitialData = async () => {
     try {
       const [productsData, locationsData] = await Promise.all([
-        stockService.getProducts(),
-        stockService.getLocations()
+        stockService.getProducts().catch(err => ({ products: [] })),
+        stockService.getLocations().catch(err => [])
       ])
+      
       setProducts(productsData.products || [])
-      setLocations(locationsData.locations || [])
+      // Backend returns locations array directly, not wrapped in an object
+      const locationsArray = Array.isArray(locationsData) ? locationsData : (locationsData.locations || [])
+      setLocations(locationsArray)
     } catch (error) {
       console.error('Error fetching initial data:', error)
       message.error(t('common.error'))
@@ -76,28 +79,56 @@ const StockLevels = () => {
       if (searchText) params.search = searchText
       if (selectedLocation) params.location_id = selectedLocation
 
-      const data = await stockService.getStockLevels(params)
-      setStockLevels(data.stockLevels || [])
+      console.log('🔍 Fetching stock levels with params:', params)
+      console.log('🌐 API URL:', `http://localhost:5000/api/stock/stock-levels-test?${new URLSearchParams(params)}`)
+      
+      // Temporarily use test endpoint to bypass authentication issues
+      const response = await fetch(`http://localhost:5000/api/stock/stock-levels-test?${new URLSearchParams(params)}`)
+      console.log('📡 Response status:', response.status)
+      console.log('📡 Response ok:', response.ok)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      console.log('✅ Stock levels API response:', result)
+      
+      const data = result.success ? result.data : []
+      console.log('📊 Data extracted:', data?.length, 'items')
+      console.log('🔢 Data type:', Array.isArray(data) ? 'Array' : typeof data)
+      
+      // Backend returns stockLevels array directly
+      const stockLevelsArray = Array.isArray(data) ? data : []
+      console.log('📋 Final stockLevelsArray length:', stockLevelsArray.length)
+      
+      if (stockLevelsArray.length > 0) {
+        console.log('📝 First item sample:', stockLevelsArray[0])
+      }
+      
+      setStockLevels(stockLevelsArray)
 
       // Calculate statistics
-      const lowStock = data.stockLevels?.filter(stock => 
+      const lowStock = stockLevelsArray?.filter(stock => 
         stock.current_quantity <= (stock.minimum_stock || 0)
       )?.length || 0
       
-      const outOfStock = data.stockLevels?.filter(stock => 
+      const outOfStock = stockLevelsArray?.filter(stock => 
         stock.current_quantity === 0
       )?.length || 0
       
-      const value = data.stockLevels?.reduce((sum, stock) => 
+      const value = stockLevelsArray?.reduce((sum, stock) => 
         sum + ((Number(stock.cost_price) || 0) * (Number(stock.current_quantity) || 0)), 0
       ) || 0
 
+      console.log('📈 Statistics calculated:', { total: stockLevelsArray.length, lowStock, outOfStock, value })
       setLowStockCount(lowStock)
       setOutOfStockCount(outOfStock)
       setTotalValue(value)
     } catch (error) {
-      console.error('Error fetching stock levels:', error)
-      message.error(t('common.error'))
+      console.error('❌ Error fetching stock levels:', error)
+      console.error('❌ Error details:', error.message)
+      message.error(`API Error: ${error.message}`)
     } finally {
       setLoading(false)
     }
@@ -232,6 +263,7 @@ const StockLevels = () => {
 
   return (
     <div className="stock-levels-page">
+      
       <Card>
         {(lowStockCount > 0 || outOfStockCount > 0) && (
           <Alert

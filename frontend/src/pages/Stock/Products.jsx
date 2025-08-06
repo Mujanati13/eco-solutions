@@ -379,12 +379,14 @@ const Products = () => {
       dataIndex: 'sku',
       key: 'sku',
       sorter: (a, b) => a.sku.localeCompare(b.sku),
+      ellipsis: true,
     },
     {
       title: t('stock.productName'),
       dataIndex: 'name',
       key: 'name',
       sorter: (a, b) => a.name.localeCompare(b.name),
+      ellipsis: true,
       filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }) => (
         <div style={{ padding: 8 }}>
           <Input
@@ -431,6 +433,7 @@ const Products = () => {
       title: t('stock.productCategory'),
       dataIndex: 'category_name',
       key: 'category_name',
+      ellipsis: true,
       render: (categoryName, record) => {
         const category = categoryName || record.category;
         return category || '-';
@@ -641,6 +644,7 @@ const Products = () => {
       title: t('stock.productLocation'),
       dataIndex: 'location_id',
       key: 'location_id',
+      ellipsis: true,
       render: (locationId) => {
         if (!locationId) return '-';
         const location = locations.find(loc => loc.id == locationId);
@@ -1026,7 +1030,7 @@ const Products = () => {
                 
                 {quickVariants.length > 0 && (
                   <Tag color="blue" style={{ marginTop: 8 }}>
-                    {t('variants.variantsWillBeCreated', { count: quickVariants.length })}
+                    {quickVariants.length} {t('variants.variantsWillBeCreated')}
                   </Tag>
                 )}
               </Space>

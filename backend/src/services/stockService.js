@@ -256,7 +256,7 @@ class StockService {
   // Stock Level Management
   static async getStockLevels(filters = {}) {
     try {
-      const { location_id, product_id, low_stock } = filters;
+      const { location_id, product_id, low_stock, search } = filters;
 
       let whereClause = '1=1';
       const queryParams = [];
@@ -271,10 +271,17 @@ class StockService {
         queryParams.push(product_id);
       }
 
+      if (search) {
+        whereClause += ' AND (p.name LIKE ? OR p.sku LIKE ? OR loc.name LIKE ?)';
+        const searchPattern = `%${search}%`;
+        queryParams.push(searchPattern, searchPattern, searchPattern);
+      }
+
       let query = `
         SELECT 
           sl.*,
-          p.sku, p.name as product_name,
+          sl.quantity_available as current_quantity,
+          p.sku, p.name as product_name, p.cost_price,
           loc.name as location_name, loc.type as location_type,
           CASE 
             WHEN sl.quantity_available = 0 THEN 'out_of_stock'
@@ -456,12 +463,12 @@ class StockService {
 
   static async createLocation(locationData) {
     try {
-      const { name, type, address, contact_person, phone, email } = locationData;
+      const { name, type, address, is_active = true } = locationData;
 
       const [result] = await pool.query(`
-        INSERT INTO stock_locations (name, type, address, contact_person, phone, email)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `, [name, type, address, contact_person, phone, email]);
+        INSERT INTO stock_locations (name, type, address, is_active)
+        VALUES (?, ?, ?, ?)
+      `, [name, type, address, is_active]);
 
       return result.insertId;
     } catch (error) {
@@ -492,13 +499,13 @@ class StockService {
 
   static async updateLocation(id, locationData) {
     try {
-      const { name, type, address, contact_person, phone, email, is_active } = locationData;
+      const { name, type, address, is_active } = locationData;
 
       const [result] = await pool.query(`
         UPDATE stock_locations 
-        SET name = ?, type = ?, address = ?, contact_person = ?, phone = ?, email = ?, is_active = ?
+        SET name = ?, type = ?, address = ?, is_active = ?
         WHERE id = ?
-      `, [name, type, address, contact_person, phone, email, is_active, id]);
+      `, [name, type, address, is_active, id]);
 
       return result.affectedRows > 0;
     } catch (error) {
@@ -655,6 +662,296 @@ class StockService {
       throw error;
     } finally {
       connection.release();
+    }
+  }
+
+  static async getProductCountByCategory(categoryId = null) {
+    try {
+      let query, params = [];
+
+      if (categoryId) {
+        // Get product count for specific category
+        query = `
+          SELECT 
+            c.id,
+            c.name as category_name,
+            c.description as category_description,
+            COUNT(p.id) as product_count,
+            COUNT(CASE WHEN p.is_active = 1 THEN 1 END) as active_product_count,
+            COUNT(CASE WHEN p.is_active = 0 THEN 1 END) as inactive_product_count
+          FROM categories c
+          LEFT JOIN products p ON c.id = p.category_id
+          WHERE c.id = ? AND c.is_active = 1
+          GROUP BY c.id, c.name, c.description
+        `;
+        params = [categoryId];
+      } else {
+        // Get product count for all categories
+        query = `
+          SELECT 
+            c.id,
+            c.name as category_name,
+            c.description as category_description,
+            c.parent_id,
+            c.level,
+            COUNT(p.id) as product_count,
+            COUNT(CASE WHEN p.is_active = 1 THEN 1 END) as active_product_count,
+            COUNT(CASE WHEN p.is_active = 0 THEN 1 END) as inactive_product_count,
+            COALESCE(SUM(CASE WHEN p.is_active = 1 THEN sl.quantity_available END), 0) as total_stock_quantity,
+            COALESCE(SUM(CASE WHEN p.is_active = 1 THEN (sl.quantity_available * p.cost_price) END), 0) as total_stock_value
+          FROM categories c
+          LEFT JOIN products p ON c.id = p.category_id
+          LEFT JOIN stock_levels sl ON p.id = sl.product_id
+          WHERE c.is_active = 1
+          GROUP BY c.id, c.name, c.description, c.parent_id, c.level
+          ORDER BY c.level ASC, c.sort_order ASC, c.name ASC
+        `;
+      }
+
+      const [rows] = await pool.query(query, params);
+      
+      if (categoryId) {
+        return rows[0] || null;
+      }
+      
+      return rows;
+    } catch (error) {
+      console.error('Get product count by category error:', error);
+      throw error;
+    }
+  }
+
+  // Category CRUD Operations
+  static async createCategory(categoryData) {
+    try {
+      const {
+        name,
+        description,
+        parent_id = null,
+        level = 1,
+        sort_order = 0,
+        image_url = null,
+        is_active = true
+      } = categoryData;
+
+      // Validate required fields
+      if (!name) {
+        throw new Error('Category name is required');
+      }
+
+      // Check if category name already exists
+      const [existing] = await pool.query(
+        'SELECT id FROM categories WHERE name = ? AND is_active = 1',
+        [name]
+      );
+
+      if (existing.length > 0) {
+        const error = new Error('Category name already exists');
+        error.code = 'ER_DUP_ENTRY';
+        throw error;
+      }
+
+      // If parent_id is provided, validate it exists and calculate level
+      let calculatedLevel = level;
+      if (parent_id) {
+        const [parent] = await pool.query(
+          'SELECT level FROM categories WHERE id = ? AND is_active = 1',
+          [parent_id]
+        );
+        
+        if (parent.length === 0) {
+          throw new Error('Parent category not found');
+        }
+        
+        calculatedLevel = parent[0].level + 1;
+      }
+
+      const [result] = await pool.query(
+        `INSERT INTO categories (
+          name, description, parent_id, level, sort_order, 
+          image_url, is_active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [name, description, parent_id, calculatedLevel, sort_order, image_url, is_active]
+      );
+
+      return result.insertId;
+    } catch (error) {
+      console.error('Create category error:', error);
+      throw error;
+    }
+  }
+
+  static async updateCategory(categoryId, categoryData) {
+    try {
+      console.log('🔄 UpdateCategory called with ID:', categoryId);
+      console.log('📥 Category data received:', categoryData);
+      
+      const {
+        name,
+        description,
+        parent_id,
+        sort_order,
+        image_url,
+        is_active
+      } = categoryData;
+
+      console.log('📋 Extracted fields:', { name, description, parent_id, sort_order, image_url, is_active });
+
+      // Check if category exists
+      const [existing] = await pool.query(
+        'SELECT id, name, level, parent_id FROM categories WHERE id = ?',
+        [categoryId]
+      );
+
+      if (existing.length === 0) {
+        console.log('❌ Category not found:', categoryId);
+        return false;
+      }
+
+      const currentCategory = existing[0];
+      console.log('📄 Current category:', currentCategory);
+
+      // Check if new name already exists (only if name is actually changing)
+      if (name && name !== currentCategory.name) {
+        const [nameCheck] = await pool.query(
+          'SELECT id FROM categories WHERE name = ? AND id != ? AND is_active = 1',
+          [name, categoryId]
+        );
+
+        if (nameCheck.length > 0) {
+          const error = new Error('Category name already exists');
+          error.code = 'ER_DUP_ENTRY';
+          throw error;
+        }
+      }
+
+      // Build update query dynamically
+      const updateFields = [];
+      const updateValues = [];
+
+      if (name !== undefined) {
+        updateFields.push('name = ?');
+        updateValues.push(name);
+      }
+      if (description !== undefined) {
+        updateFields.push('description = ?');
+        updateValues.push(description);
+      }
+      if (parent_id !== undefined) {
+        updateFields.push('parent_id = ?');
+        updateValues.push(parent_id);
+        
+        // Recalculate level if parent changes
+        if (parent_id !== currentCategory.parent_id) {
+          let newLevel = 1;
+          if (parent_id) {
+            const [parent] = await pool.query(
+              'SELECT level FROM categories WHERE id = ? AND is_active = 1',
+              [parent_id]
+            );
+            
+            if (parent.length === 0) {
+              throw new Error('Parent category not found');
+            }
+            
+            newLevel = parent[0].level + 1;
+          }
+          
+          updateFields.push('level = ?');
+          updateValues.push(newLevel);
+        }
+      }
+      if (sort_order !== undefined) {
+        updateFields.push('sort_order = ?');
+        updateValues.push(sort_order);
+      }
+      if (image_url !== undefined) {
+        updateFields.push('image_url = ?');
+        updateValues.push(image_url);
+      }
+      if (is_active !== undefined) {
+        console.log('🔄 Adding is_active to update:', is_active);
+        updateFields.push('is_active = ?');
+        updateValues.push(is_active);
+      }
+
+      console.log('📋 Update fields:', updateFields);
+      console.log('📤 Update values:', updateValues);
+
+      if (updateFields.length === 0) {
+        console.log('⚠️ No fields to update');
+        return true; // No changes to update
+      }
+
+      updateValues.push(categoryId);
+      
+      const query = `UPDATE categories SET ${updateFields.join(', ')} WHERE id = ?`;
+      console.log('🔄 Final update query:', query);
+      console.log('📤 Final update values:', updateValues);
+
+      const [result] = await pool.query(query, updateValues);
+      
+      console.log('✅ Update result:', result);
+      console.log('📊 Affected rows:', result.affectedRows);
+      
+      // Verify the update by fetching the updated record
+      if (result.affectedRows > 0) {
+        const [verifyResult] = await pool.query(
+          'SELECT id, name, is_active FROM categories WHERE id = ?',
+          [categoryId]
+        );
+        console.log('🔍 Verification - Updated category:', verifyResult[0]);
+      }
+      
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error('Update category error:', error);
+      throw error;
+    }
+  }
+
+  static async deleteCategory(categoryId) {
+    try {
+      // Check if category exists
+      const [existing] = await pool.query(
+        'SELECT id, name FROM categories WHERE id = ?',
+        [categoryId]
+      );
+
+      if (existing.length === 0) {
+        return false;
+      }
+
+      // Check if category has products
+      const [products] = await pool.query(
+        'SELECT COUNT(*) as count FROM products WHERE category_id = ? AND is_active = 1',
+        [categoryId]
+      );
+
+      if (products[0].count > 0) {
+        throw new Error(`Cannot delete category with products. Please reassign the ${products[0].count} products first.`);
+      }
+
+      // Check if category has child categories
+      const [children] = await pool.query(
+        'SELECT COUNT(*) as count FROM categories WHERE parent_id = ? AND is_active = 1',
+        [categoryId]
+      );
+
+      if (children[0].count > 0) {
+        throw new Error(`Cannot delete category with subcategories. Please delete the ${children[0].count} subcategories first.`);
+      }
+
+      // Soft delete the category
+      const [result] = await pool.query(
+        'UPDATE categories SET is_active = 0 WHERE id = ?',
+        [categoryId]
+      );
+
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error('Delete category error:', error);
+      throw error;
     }
   }
 }

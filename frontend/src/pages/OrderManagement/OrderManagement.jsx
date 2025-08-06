@@ -37,7 +37,6 @@ import {
   UserAddOutlined,
   ShareAltOutlined,
   UploadOutlined,
-  NodeIndexOutlined,
   FileExcelOutlined,
   UserOutlined,
   EyeOutlined,
@@ -69,6 +68,8 @@ const OrderManagement = () => {
   const [editingOrder, setEditingOrder] = useState(null);
   const [form] = Form.useForm();
   const [searchText, setSearchText] = useState("");
+  const [allOrders, setAllOrders] = useState([]); // Store all orders for frontend filtering
+  const [filteredOrders, setFilteredOrders] = useState([]); // Store filtered orders
   const [statusFilter, setStatusFilter] = useState("");
   const [assignedToFilter, setAssignedToFilter] = useState("");
   const [pagination, setPagination] = useState({
@@ -128,17 +129,61 @@ const OrderManagement = () => {
     if (canAssignOrders) {
       fetchUsers();
     }
-  }, [pagination.current, pagination.pageSize, statusFilter, assignedToFilter]);
+  }, []); // Remove filters from dependency array since we're doing frontend filtering
+
+  // Frontend filtering effect
+  useEffect(() => {
+    applyFrontendFilters();
+  }, [searchText, allOrders, statusFilter, assignedToFilter]);
+
+  const applyFrontendFilters = () => {
+    let filtered = [...allOrders];
+
+    // Apply phone search filter
+    if (searchText && searchText.trim()) {
+      const searchTerm = searchText.trim().toLowerCase();
+      filtered = filtered.filter(order => 
+        (order.customer_phone && 
+         order.customer_phone.toLowerCase().includes(searchTerm)) ||
+        (order.customer_name && 
+         order.customer_name.toLowerCase().includes(searchTerm))
+      );
+      console.log('📱 Frontend filtering by phone/name:', searchTerm);
+      console.log('📊 Filtered results:', filtered.length);
+    }
+
+    // Apply status filter
+    if (statusFilter) {
+      filtered = filtered.filter(order => order.status === statusFilter);
+    }
+
+    // Apply assigned to filter
+    if (assignedToFilter) {
+      if (assignedToFilter === "null") {
+        filtered = filtered.filter(order => !order.assigned_to);
+      } else {
+        filtered = filtered.filter(order => order.assigned_to == assignedToFilter);
+      }
+    }
+
+    setFilteredOrders(filtered);
+    
+    // Update pagination total based on filtered results
+    setPagination(prev => ({
+      ...prev,
+      total: filtered.length,
+      current: 1 // Reset to first page when filtering
+    }));
+  };
 
   const fetchOrders = async () => {
     try {
       setLoading(true);
       const params = {
-        page: pagination.current,
-        limit: pagination.pageSize,
-        customer_name: searchText,
-        status: statusFilter,
-        assigned_to: assignedToFilter,
+        page: 1, // Always fetch from first page to get all data
+        limit: 1000, // Fetch more orders for frontend filtering
+        status: '', // Remove status filter from backend, handle in frontend
+        assigned_to: '', // Remove assigned_to filter from backend, handle in frontend
       };
 
       // Role-based filtering
@@ -150,16 +195,20 @@ const OrderManagement = () => {
         params.supervisor_id = user.id;
       }
 
+      console.log('🔍 Fetching all orders for frontend filtering:', params);
+
       const response = await orderService.getOrders(params);
 
       // Based on the API format, response should have { orders: [...], pagination: {...} }
       const ordersData = response.orders || [];
 
-      setOrders(ordersData);
-      setPagination({
-        ...pagination,
-        total: response.pagination?.total || 0,
-      });
+      setAllOrders(ordersData);
+      
+      // Initial pagination setup
+      setPagination(prev => ({
+        ...prev,
+        total: ordersData.length,
+      }));
     } catch (error) {
       message.error(t("common.error"));
     } finally {
@@ -197,8 +246,15 @@ const OrderManagement = () => {
   };
 
   const handleSearch = () => {
-    setPagination({ ...pagination, current: 1 });
-    fetchOrders();
+    console.log('🔍 Manual search triggered with text:', searchText);
+    // Frontend filtering will be triggered by useEffect
+  };
+
+  const handleClearSearch = () => {
+    setSearchText("");
+    setStatusFilter("");
+    setAssignedToFilter("");
+    // This will trigger the filtering effect and show all orders
   };
 
   // Delivery management functions
@@ -328,6 +384,71 @@ const OrderManagement = () => {
     }
   };
 
+  // Function to automatically match product by name
+  const autoSelectProductByName = async (productName) => {
+    if (!productName) {
+      return null;
+    }
+
+    // If products are still loading, wait a bit and retry
+    if (loadingProducts || !products.length) {
+      console.log('Products not loaded yet, waiting...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // If still no products after waiting, return null
+      if (!products.length) {
+        console.log('No products available for matching');
+        return null;
+      }
+    }
+
+    const cleanProductName = productName.trim();
+    console.log('Attempting to match product name:', cleanProductName);
+
+    // First try exact match (case insensitive)
+    let matchedProduct = products.find(p => 
+      p.name && p.name.toLowerCase().trim() === cleanProductName.toLowerCase()
+    );
+
+    // If no exact match, try partial match (product name contains search term)
+    if (!matchedProduct) {
+      matchedProduct = products.find(p => 
+        p.name && p.name.toLowerCase().includes(cleanProductName.toLowerCase())
+      );
+    }
+
+    // If still no match, try reverse partial match (search term contains product name)
+    if (!matchedProduct) {
+      matchedProduct = products.find(p => 
+        p.name && cleanProductName.toLowerCase().includes(p.name.toLowerCase())
+      );
+    }
+
+    // Try matching without special characters and extra spaces
+    if (!matchedProduct) {
+      const normalizedSearchName = cleanProductName.toLowerCase().replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, ' ');
+      matchedProduct = products.find(p => {
+        if (!p.name) return false;
+        const normalizedProductName = p.name.toLowerCase().replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, ' ');
+        return normalizedProductName === normalizedSearchName || 
+               normalizedProductName.includes(normalizedSearchName) ||
+               normalizedSearchName.includes(normalizedProductName);
+      });
+    }
+
+    if (matchedProduct) {
+      console.log('Found matching product:', matchedProduct.name, 'SKU:', matchedProduct.sku, 'External Link:', matchedProduct.external_link || 'None');
+      // Automatically select the matched product
+      await handleProductSelection(matchedProduct.sku);
+      return matchedProduct;
+    } else {
+      console.log('No matching product found for:', cleanProductName);
+      console.log('Available products:', products.map(p => p.name));
+    }
+
+    return null;
+  };
+
   const handleProductSelection = async (productSku) => {
     if (!productSku) {
       setSelectedProduct(null);
@@ -348,10 +469,21 @@ const OrderManagement = () => {
             ...form.getFieldValue('product_info'),
             name: product.name,
             unit_price: product.selling_price,
-            category: product.category_name || ''
+            category: product.category_name || '',
+            external_link: product.external_link || ''
           },
           total_amount: product.selling_price.toFixed(2) // Set total_amount to unit price (this is now the main price field)
         });
+        
+        // Force form to re-render to update dependencies
+        setTimeout(() => {
+          form.setFieldsValue({
+            product_info: {
+              ...form.getFieldValue('product_info'),
+              external_link: product.external_link || ''
+            }
+          });
+        }, 50);
         
         // Update calculations
         setTimeout(() => updateProductTotal(), 100);
@@ -493,7 +625,7 @@ const OrderManagement = () => {
       
       // Handle stock deduction for delivered orders
       if (newStatus === 'delivered') {
-        const order = orders.find(o => o.id === orderId);
+        const order = allOrders.find(o => o.id === orderId);
         if (order && order.product_details) {
           try {
             const productDetails = typeof order.product_details === 'string' 
@@ -544,7 +676,7 @@ const OrderManagement = () => {
       // Handle stock deduction for confirmed orders (when they enter processing pipeline)
       else if (newStatus === 'confirmed') {
         console.log(`📦 Processing confirmed status for order ${orderId}`);
-        const order = orders.find(o => o.id === orderId);
+        const order = allOrders.find(o => o.id === orderId);
         console.log(`📋 Found order:`, order);
         
         if (order && order.product_details) {
@@ -593,6 +725,54 @@ const OrderManagement = () => {
           console.log(`🔄 Refreshing orders to get Ecotrack data...`);
           fetchOrders();
         }, 2000);
+      }
+      // Handle Ecotrack deletion for cancelled orders
+      else if (newStatus === 'cancelled') {
+        const order = allOrders.find(o => o.id === orderId);
+        
+        console.log(`🔍 Checking order for Ecotrack deletion:`, {
+          orderId,
+          order: order ? 'Found' : 'Not found',
+          ecotrack_tracking_id: order?.ecotrack_tracking_id,
+          tracking_id: order?.tracking_id // Just for debugging
+        });
+        
+        // Check if order has Ecotrack tracking ID
+        if (order && order.ecotrack_tracking_id) {
+          try {
+            console.log(`🗑️ Deleting order from Ecotrack: ${order.ecotrack_tracking_id}`);
+            
+            // Call Ecotrack deletion API
+            const deleteResponse = await fetch('https://app.noest-dz.com/api/public/delete/order', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                api_token: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
+                user_guid: '2QG0JDFP',
+                tracking: order.ecotrack_tracking_id
+              })
+            });
+
+            if (deleteResponse.ok) {
+              const deleteResult = await deleteResponse.json();
+              console.log(`✅ Successfully deleted from Ecotrack:`, deleteResult);
+              message.success(`${t("orders.statusUpdateSuccess")} - Order removed from Ecotrack tracking system`);
+            } else {
+              console.warn(`⚠️ Failed to delete from Ecotrack:`, await deleteResponse.text());
+              message.warning(`${t("orders.statusUpdateSuccess")} - Note: Could not remove from Ecotrack tracking system`);
+            }
+          } catch (ecotrackError) {
+            console.error('Error deleting from Ecotrack:', ecotrackError);
+            message.warning(`${t("orders.statusUpdateSuccess")} - Note: Could not remove from Ecotrack tracking system`);
+          }
+        } else {
+          console.log(`ℹ️ Order has no Ecotrack tracking ID, skipping deletion from Ecotrack`);
+          message.success(t("orders.statusUpdateSuccess"));
+        }
+        
+        fetchOrders();
       } else {
         // Show success message for other status changes
         message.success(t("orders.statusUpdateSuccess"));
@@ -912,12 +1092,6 @@ const OrderManagement = () => {
     );
   };
 
-  // Helper function to get product info for an order
-  const getOrderProductInfo = (orderId) => {
-    const orderData = ordersWithProducts.find(o => o.order_id === orderId);
-    return orderData || { products: [], total_products: 0 };
-  };
-
   const columns = [
     {
       title: t("orders.customerName"),
@@ -950,110 +1124,6 @@ const OrderManagement = () => {
           <Text>{text}</Text>
         </Tooltip>
       ),
-    },
-    {
-      title: (
-        <div style={{ textAlign: 'center' }}>
-          <NodeIndexOutlined style={{ marginRight: 4 }} />
-          {t('orders.products')}
-        </div>
-      ),
-      key: 'products',
-      width: 140,
-      align: 'center',
-      render: (_, record) => {
-        const productInfo = getOrderProductInfo(record.id);
-        const hasProducts = productInfo.products && productInfo.products.length > 0;
-        
-        if (!hasProducts) {
-          return (
-            <div style={{ textAlign: 'center', color: '#999', fontSize: '12px' }}>
-              <div style={{ marginBottom: 2 }}>
-                <NodeIndexOutlined style={{ opacity: 0.3 }} />
-              </div>
-              <div>{t('orders.noProducts')}</div>
-            </div>
-          );
-        }
-
-        const firstProduct = productInfo.products[0];
-        const moreCount = productInfo.products.length - 1;
-
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-            <Tooltip title={`${productInfo.total_products} ${t('orders.productsLinked')}`}>
-              <Tag 
-                color="blue" 
-                style={{ 
-                  margin: 0, 
-                  fontSize: '11px', 
-                  fontWeight: '500',
-                  borderRadius: '8px',
-                  padding: '2px 6px',
-                  cursor: 'pointer'
-                }}
-                onClick={() => {
-                  Modal.info({
-                    title: `${t('orders.productsInOrder')} ${record.order_number || record.id}`,
-                    content: (
-                      <div>
-                        {productInfo.products.map((product, index) => (
-                          <div key={index} style={{ marginBottom: '8px', padding: '8px', border: '1px solid #f0f0f0', borderRadius: '4px' }}>
-                            <div><strong>{product.name || product.product_name}</strong></div>
-                            <div>SKU: {product.sku}</div>
-                            <div>{t('orders.quantity')}: {product.quantity}</div>
-                            <div>{t('orders.price')}: {product.unit_price} DA</div>
-                          </div>
-                        ))}
-                      </div>
-                    ),
-                    width: 600
-                  });
-                }}
-              >
-                📦 {productInfo.total_products}
-              </Tag>
-            </Tooltip>
-            
-            {firstProduct && (
-              <Tooltip title={`${firstProduct.name || firstProduct.product_name} (${firstProduct.sku})`}>
-                <div style={{ 
-                  fontSize: '10px', 
-                  color: '#666',
-                  textAlign: 'center',
-                  maxWidth: '120px',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}>
-                  {firstProduct.name || firstProduct.product_name}
-                  {moreCount > 0 && ` +${moreCount}`}
-                </div>
-              </Tooltip>
-            )}
-          </div>
-        );
-      },
-      sorter: (a, b) => {
-        const aInfo = getOrderProductInfo(a.id);
-        const bInfo = getOrderProductInfo(b.id);
-        return (aInfo.total_products || 0) - (bInfo.total_products || 0);
-      },
-      filters: [
-        { text: t('orders.hasProducts'), value: 'has_products' },
-        { text: t('orders.noProducts'), value: 'no_products' },
-      ],
-      onFilter: (value, record) => {
-        const productInfo = getOrderProductInfo(record.id);
-        switch (value) {
-          case 'has_products':
-            return productInfo.total_products > 0;
-          case 'no_products':
-            return productInfo.total_products === 0;
-          default:
-            return true;
-        }
-      },
     },
     {
       title: t("orders.customerCity"),
@@ -1253,7 +1323,7 @@ const OrderManagement = () => {
             type="link"
             size="small"
             icon={<EditOutlined />}
-            onClick={() => {
+            onClick={async () => {
               setEditingOrder(record);
               
               // Parse product_details if it exists and is valid JSON
@@ -1275,16 +1345,31 @@ const OrderManagement = () => {
                 }
               }
 
+              // Set initial form values
               form.setFieldsValue({
                 ...record,
                 product_info: productInfo,
               });
               setModalVisible(true);
               
-              // Update final total after form is populated
-              setTimeout(() => {
+              // Auto-select product based on name match
+              setTimeout(async () => {
+                if (productInfo.name) {
+                  try {
+                    const matchedProduct = await autoSelectProductByName(productInfo.name);
+                    if (matchedProduct) {
+                      console.log('Auto-selected product:', matchedProduct.name, 'SKU:', matchedProduct.sku);
+                    } else {
+                      console.log('No matching product found for:', productInfo.name);
+                    }
+                  } catch (error) {
+                    console.warn('Error auto-selecting product:', error);
+                  }
+                }
+                
+                // Update final total after form is populated and product selection
                 updateFinalTotal();
-              }, 100);
+              }, 300);
             }}
           />
           {ecotrackEnabled && record.ecotrack_tracking_id && (
@@ -1332,6 +1417,15 @@ const OrderManagement = () => {
     },
   ];
 
+  // Get paginated data from filtered orders
+  const getPaginatedOrders = () => {
+    const startIndex = (pagination.current - 1) * pagination.pageSize;
+    const endIndex = startIndex + pagination.pageSize;
+    return filteredOrders.slice(startIndex, endIndex);
+  };
+
+  const paginatedOrders = getPaginatedOrders();
+
   return (
     <div className="orders-page">
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
@@ -1373,7 +1467,7 @@ const OrderManagement = () => {
         <Row gutter={16}>
           <Col xs={24} sm={12} md={6}>
             <Input
-              placeholder={t("orders.searchPlaceholder")}
+              placeholder={t("orders.searchByNameOrPhone") || "Search by name or phone..."}
               prefix={<SearchOutlined />}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
@@ -1385,7 +1479,10 @@ const OrderManagement = () => {
               placeholder={t("orders.filterByStatus")}
               style={{ width: "100%" }}
               value={statusFilter}
-              onChange={setStatusFilter}
+              onChange={(value) => {
+                setStatusFilter(value || "");
+                console.log('🏷️ Status filter changed:', value);
+              }}
               allowClear
             >
               <Option value="pending">{t("orders.statuses.pending")}</Option>
@@ -1435,7 +1532,10 @@ const OrderManagement = () => {
                 placeholder={t("orders.filterByAssignee")}
                 style={{ width: "100%" }}
                 value={assignedToFilter}
-                onChange={setAssignedToFilter}
+                onChange={(value) => {
+                  setAssignedToFilter(value || "");
+                  console.log('👤 Assigned to filter changed:', value);
+                }}
                 allowClear
               >
                 <Option value="null">{t("orders.unassigned")}</Option>
@@ -1449,37 +1549,48 @@ const OrderManagement = () => {
             </Col>
           )}
           <Col xs={24} sm={12} md={6}>
-            <Space wrap>
-              <Button
-                type="primary"
-                size="small"
-                onClick={handleSearch}
-                icon={<SearchOutlined />}
-              ></Button>
-
-              {isAdmin && (
-                <Button
-                  type="primary"
-                  size="small"
-                  onClick={() => {
-                    setEditingOrder(null);
-                    form.resetFields();
-                    setModalVisible(true);
-                    
-                    // Reset final total for new order
-                    setFinalTotal(0);
-                  }}
-                  icon={<PlusOutlined />}
-                ></Button>
-              )}
-              <Button
-                size="small"
-                onClick={fetchOrders}
-                icon={<ReloadOutlined />}
-              >
-                <span className="btn-text-sm">{t("common.refresh")}</span>
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'search',
+                    label: t("common.search"),
+                    icon: <SearchOutlined />,
+                    onClick: handleSearch,
+                  },
+                  {
+                    key: 'clear',
+                    label: t("common.clear"), 
+                    icon: <ReloadOutlined />,
+                    onClick: handleClearSearch,
+                  },
+                  ...(isAdmin ? [{
+                    key: 'add',
+                    label: t("common.add"),
+                    icon: <PlusOutlined />,
+                    onClick: () => {
+                      setEditingOrder(null);
+                      form.resetFields();
+                      setModalVisible(true);
+                      
+                      // Reset final total for new order
+                      setFinalTotal(0);
+                    },
+                  }] : []),
+                  {
+                    key: 'refresh',
+                    label: t("common.refresh"),
+                    icon: <ReloadOutlined />,
+                    onClick: fetchOrders,
+                  },
+                ],
+              }}
+              placement="bottomRight"
+            >
+              <Button size="small" icon={<SettingOutlined />}>
+                {t("common.actions")} <DownOutlined />
               </Button>
-            </Space>
+            </Dropdown>
           </Col>
         </Row>
       </Card>
@@ -1488,19 +1599,19 @@ const OrderManagement = () => {
       <Card>
         <Table
           columns={columns}
-          dataSource={orders}
+          dataSource={paginatedOrders}
           rowKey="id"
           loading={loading}
           size="small"
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
-            total: pagination.total,
+            total: filteredOrders.length, // Use filtered orders length
             showSizeChanger: true,
             showQuickJumper: true,
             responsive: true,
             showTotal: (total, range) =>
-              `${range[0]}-${range[1]} ${t("dashboard.outOf")} ${total}`,
+              `${range[0]}-${range[1]} ${t("dashboard.outOf")} ${total}${searchText ? ` (filtered from ${allOrders.length})` : ''}`,
             onChange: (page, pageSize) => {
               setPagination({ ...pagination, current: page, pageSize });
             },
@@ -1783,115 +1894,295 @@ const OrderManagement = () => {
               { required: true, message: t("orders.productDetailsRequired") },
             ]}
           >
-            <Card size="small" style={{ backgroundColor: '#fafafa' }}>
-              <Row gutter={[16, 16]}>
-                <Col span={12}>
-                  <Form.Item
-                    name={['product_info', 'sku']}
-                    label={t("orders.productSku")}
-                    style={{ marginBottom: 8 }}
-                  >
-                    <Select
-                      placeholder={t("orders.selectProductSku")}
-                      showSearch
-                      optionFilterProp="children"
-                      loading={loadingProducts}
-                      onChange={handleProductSelection}
-                      filterOption={(input, option) =>
-                        option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-                      }
-                    >
-                      {products.map((product) => (
-                        <Option key={product.sku} value={product.sku}>
-                          {product.sku} - {product.name}
-                        </Option>
-                      ))}
-                    </Select>
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name={['product_info', 'name']}
-                    label={t("orders.productName")}
-                    style={{ marginBottom: 8 }}
-                  >
-                    <Input 
-                      placeholder={t("orders.enterProductName")} 
-                      disabled={selectedProduct}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={4}>
-                  <Form.Item
-                    name={['product_info', 'quantity']}
-                    label={t("orders.quantity")}
-                    style={{ marginBottom: 8 }}
-                    initialValue={1}
-                  >
-                    <Input 
-                      type="number" 
-                      min={1} 
-                      defaultValue={1}
-                      placeholder="1"
-                      max={productStock || undefined}
-                      onChange={() => updateProductTotal()}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={4}></Col>
-                {selectedProduct && (
+            <Card 
+              size="small" 
+              style={{ backgroundColor: '#fafafa' }}
+              title={
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold' }}>
+                    📦 {t("orders.productInformation")}
+                  </span>
+                  {selectedProduct && (
+                    <Tag color="green" size="small">
+                      {t("orders.autoSelected")}
+                    </Tag>
+                  )}
+                </div>
+              }
+            >
+              {/* Product Selection Section */}
+              <div style={{ 
+                backgroundColor: '#f0f8ff', 
+                padding: '12px', 
+                borderRadius: '6px', 
+                marginBottom: '16px',
+                border: '1px solid #d9d9d9'
+              }}>
+                <Text strong style={{ fontSize: '13px', color: '#1890ff', marginBottom: '8px', display: 'block' }}>
+                  🔍 {t("orders.productSelection")}
+                </Text>
+                <Row gutter={[12, 8]}>
                   <Col span={12}>
-                    <Card 
-                      size="small" 
-                      style={{ 
-                        backgroundColor: productStock <= 5 ? '#fff2f0' : '#f6ffed',
-                        border: `1px solid ${productStock <= 5 ? '#ffccc7' : '#b7eb8f'}`
-                      }}
+                    <Form.Item
+                      name={['product_info', 'sku']}
+                      label={t("orders.productSku")}
+                      style={{ marginBottom: 8 }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text strong>{t("stock.currentStock")}:</Text>
-                        <Tag color={productStock <= 5 ? 'red' : productStock <= 10 ? 'orange' : 'green'}>
-                          {productStock} {t("stock.units")}
-                        </Tag>
-                      </div>
-                      {productStock <= 5 && (
-                        <div style={{ marginTop: 4, color: '#ff4d4f', fontSize: '12px' }}>
-                          ⚠️ {t("stock.lowStockWarning")}
-                        </div>
-                      )}
-                    </Card>
+                      <Select
+                        placeholder={t("orders.selectProductSku")}
+                        showSearch
+                        optionFilterProp="children"
+                        loading={loadingProducts}
+                        onChange={handleProductSelection}
+                        filterOption={(input, option) =>
+                          option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                        }
+                      >
+                        {products.map((product) => (
+                          <Option key={product.sku} value={product.sku}>
+                            {product.sku} - {product.name}
+                          </Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
                   </Col>
-                )}
-                <Col span={12}>
-                  <Form.Item
-                    name={['product_info', 'category']}
-                    label={t("orders.productCategory")}
-                    style={{ marginBottom: 8 }}
-                  >
-                    <Input 
-                      placeholder={t("orders.enterProductCategory")}
-                      disabled={selectedProduct}
-                    />
+                  <Col span={12}>
+                    <Form.Item
+                      name={['product_info', 'name']}
+                      label={t("orders.productName")}
+                      style={{ marginBottom: 8 }}
+                    >
+                      <Input 
+                        placeholder={t("orders.enterProductName")} 
+                        disabled={selectedProduct}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </div>
+
+              {/* Product Details Section */}
+              <div style={{ 
+                backgroundColor: '#fff7e6', 
+                padding: '12px', 
+                borderRadius: '6px', 
+                marginBottom: '16px',
+                border: '1px solid #d9d9d9'
+              }}>
+                <Text strong style={{ fontSize: '13px', color: '#fa8c16', marginBottom: '8px', display: 'block' }}>
+                  📋 {t("orders.productInfo")}
+                </Text>
+                <Row gutter={[12, 8]}>
+                  <Col span={8}>
+                    <Form.Item
+                      name={['product_info', 'quantity']}
+                      label={t("orders.quantity")}
+                      style={{ marginBottom: 8 }}
+                      initialValue={1}
+                    >
+                      <Input 
+                        type="number" 
+                        min={1} 
+                        defaultValue={1}
+                        placeholder="1"
+                        max={productStock || undefined}
+                        onChange={() => updateProductTotal()}
+                        prefix="📦"
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={16}>
+                    <Form.Item
+                      name={['product_info', 'category']}
+                      label={t("orders.productCategory")}
+                      style={{ marginBottom: 8 }}
+                    >
+                      <Input 
+                        placeholder={t("orders.enterProductCategory")}
+                        disabled={selectedProduct}
+                        prefix="🏷️"
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </div>
+
+              {/* Stock Information Section */}
+              {selectedProduct && (
+                <div style={{ 
+                  backgroundColor: productStock <= 5 ? '#fff2f0' : '#f6ffed',
+                  padding: '12px', 
+                  borderRadius: '6px', 
+                  marginBottom: '16px',
+                  border: `1px solid ${productStock <= 5 ? '#ffccc7' : '#b7eb8f'}`
+                }}>
+                  <Text strong style={{ 
+                    fontSize: '13px', 
+                    color: productStock <= 5 ? '#ff4d4f' : '#52c41a', 
+                    marginBottom: '8px', 
+                    display: 'block' 
+                  }}>
+                    📊 {t("stock.stockStatus")}
+                  </Text>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text strong>{t("stock.currentStock")}:</Text>
+                    <Tag color={productStock <= 5 ? 'red' : productStock <= 10 ? 'orange' : 'green'}>
+                      {productStock} {t("stock.units")}
+                    </Tag>
+                  </div>
+                  {productStock <= 5 && (
+                    <div style={{ marginTop: 8, color: '#ff4d4f', fontSize: '12px', fontWeight: 'bold' }}>
+                      ⚠️ {t("stock.lowStockWarning")}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Description Section */}
+              <div style={{ 
+                backgroundColor: '#f0f2f5', 
+                padding: '12px', 
+                borderRadius: '6px', 
+                marginBottom: '16px',
+                border: '1px solid #d9d9d9'
+              }}>
+                <Text strong style={{ fontSize: '13px', color: '#595959', marginBottom: '8px', display: 'block' }}>
+                  📝 {t("orders.productDescription")}
+                </Text>
+                <Form.Item
+                  name={['product_info', 'description']}
+                  style={{ marginBottom: 0 }}
+                >
+                  <TextArea
+                    rows={3}
+                    placeholder={t("orders.enterProductDescription")}
+                    style={{ resize: 'vertical' }}
+                  />
+                </Form.Item>
+              </div>
+
+              {/* External Link Section */}
+              <div style={{ 
+                backgroundColor: '#f0f8ff', 
+                padding: '12px', 
+                borderRadius: '6px', 
+                marginBottom: '8px',
+                border: '1px solid #d9d9d9'
+              }}>
+                <Text strong style={{ fontSize: '13px', color: '#1890ff', marginBottom: '8px', display: 'block' }}>
+                  🔗 {t("orders.productExternalLink")}
+                </Text>
+                <Form.Item
+                  name={['product_info', 'external_link']}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Form.Item dependencies={[['product_info', 'external_link'], ['product_info', 'sku']]} noStyle>
+                    {({ getFieldValue }) => {
+                      const externalLink = getFieldValue(['product_info', 'external_link']);
+                      const currentSku = getFieldValue(['product_info', 'sku']);
+                      
+                      // Also check if we have a selected product with external_link
+                      const productExternalLink = selectedProduct?.external_link;
+                      const displayLink = externalLink || productExternalLink;
+                      
+                      console.log('External Link Debug:', {
+                        formExternalLink: externalLink,
+                        selectedProductLink: productExternalLink,
+                        displayLink: displayLink,
+                        currentSku: currentSku
+                      });
+                      
+                      if (!displayLink) {
+                        return (
+                          <div style={{ 
+                            padding: '12px', 
+                            border: '1px dashed #d9d9d9', 
+                            borderRadius: '6px', 
+                            backgroundColor: '#fafafa',
+                            color: '#999',
+                            fontStyle: 'italic',
+                            textAlign: 'center'
+                          }}>
+                            🚫 {t("orders.noExternalLink") || "No external link available"}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div style={{ 
+                          padding: '12px', 
+                          border: '2px solid #1890ff', 
+                          borderRadius: '6px', 
+                          backgroundColor: '#f0f8ff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px'
+                        }}>
+                          <LinkOutlined style={{ color: '#1890ff', fontSize: '16px' }} />
+                          <Button
+                            type="link"
+                            style={{ 
+                              padding: 0, 
+                              height: 'auto',
+                              color: '#1890ff',
+                              textDecoration: 'underline',
+                              fontSize: '14px',
+                              fontWeight: '500',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              maxWidth: '400px',
+                              flex: 1
+                            }}
+                            onClick={() => {
+                              if (displayLink.startsWith('http://') || displayLink.startsWith('https://')) {
+                                window.open(displayLink, '_blank');
+                              } else {
+                                window.open(`https://${displayLink}`, '_blank');
+                              }
+                            }}
+                            title={displayLink}
+                          >
+                            {displayLink}
+                          </Button>
+                          <Button
+                            type="primary"
+                            size="small"
+                            icon={<LinkOutlined />}
+                            onClick={() => {
+                              if (displayLink.startsWith('http://') || displayLink.startsWith('https://')) {
+                                window.open(displayLink, '_blank');
+                              } else {
+                                window.open(`https://${displayLink}`, '_blank');
+                              }
+                            }}
+                          >
+                            {t("orders.openLink")}
+                          </Button>
+                        </div>
+                      );
+                    }}
                   </Form.Item>
-                </Col>
-                <Col span={24}>
-                  <Form.Item
-                    name={['product_info', 'description']}
-                    label={t("orders.productDescription")}
-                    style={{ marginBottom: 0 }}
-                  >
-                    <TextArea
-                      rows={3}
-                      placeholder={t("orders.enterProductDescription")}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-              <div style={{ marginTop: 8, padding: '8px', backgroundColor: '#f0f0f0', borderRadius: '4px', fontSize: '12px', color: '#666' }}>
-                💡 {t("orders.productDetailsHint")}
+                </Form.Item>
+              </div>
+
+              {/* Info Section */}
+              <div style={{ 
+                backgroundColor: '#f0f0f0', 
+                padding: '10px 12px', 
+                borderRadius: '6px', 
+                fontSize: '12px', 
+                color: '#666' 
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                  💡 <Text style={{ fontSize: '12px' }}>{t("orders.productDetailsHint")}</Text>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#8c8c8c', fontSize: '11px' }}>
+                  📄 <Text style={{ fontSize: '11px' }}>{t("orders.dataStorageHint")}</Text>
+                </div>
                 {selectedProduct && (
-                  <div style={{ marginTop: 4, color: '#1890ff' }}>
-                    📦 {t("stock.autoStockDeduction")}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', color: '#1890ff' }}>
+                    📦 <Text style={{ fontSize: '11px' }}>{t("stock.autoStockDeduction")}</Text>
                   </div>
                 )}
               </div>

@@ -15,6 +15,7 @@ import {
   Tag,
   Popconfirm,
   Tooltip,
+  Select,
 } from 'antd'
 import {
   PlusOutlined,
@@ -31,6 +32,7 @@ import './StockLocations.css'
 
 const { Search } = Input
 const { TextArea } = Input
+const { Option } = Select
 
 const StockLocations = () => {
   const { t } = useTranslation()
@@ -148,19 +150,6 @@ const StockLocations = () => {
       dataIndex: 'type',
       key: 'type',
       render: (type) => type || '-',
-    },
-    {
-      title: t('stock.contactPerson'),
-      dataIndex: 'contact_person',
-      key: 'contact_person',
-      render: (contact) => contact || '-',
-    },
-    {
-      title: t('common.description'),
-      dataIndex: 'description',
-      key: 'description',
-      ellipsis: true,
-      render: (description) => description || '-',
     },
     {
       title: t('stock.locationActive'),
@@ -303,39 +292,16 @@ const StockLocations = () => {
           <Form.Item
             name="type"
             label={t('stock.locationType')}
+            rules={[{ required: true, message: t('common.required') }]}
           >
-            <Input placeholder={t('stock.locationType')} />
-          </Form.Item>
-
-          <Form.Item
-            name="contact_person"
-            label={t('stock.contactPerson')}
-          >
-            <Input placeholder={t('stock.contactPerson')} />
-          </Form.Item>
-
-          <Form.Item
-            name="phone"
-            label={t('common.phone')}
-          >
-            <Input placeholder={t('common.phone')} />
-          </Form.Item>
-
-          <Form.Item
-            name="email"
-            label={t('common.email')}
-          >
-            <Input placeholder={t('common.email')} type="email" />
-          </Form.Item>
-
-          <Form.Item
-            name="description"
-            label={t('common.description')}
-          >
-            <TextArea
-              placeholder={t('common.description')}
-              rows={3}
-            />
+            <Select placeholder={t('stock.locationType')}>
+              <Option value="warehouse">{t('stock.locationTypes.warehouse') || 'Warehouse'}</Option>
+              <Option value="store">{t('stock.locationTypes.store') || 'Store'}</Option>
+              <Option value="supplier">{t('stock.locationTypes.supplier') || 'Supplier'}</Option>
+              <Option value="customer">{t('stock.locationTypes.customer') || 'Customer'}</Option>
+              <Option value="damaged">{t('stock.locationTypes.damaged') || 'Damaged'}</Option>
+              <Option value="other">{t('stock.locationTypes.other') || 'Other'}</Option>
+            </Select>
           </Form.Item>
 
           <Form.Item

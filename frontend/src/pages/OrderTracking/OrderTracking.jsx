@@ -58,7 +58,12 @@ const OrderTracking = () => {
   const [ecotrackDetails, setEcotrackDetails] = useState(null);
   const [ecotrackLoading, setEcotrackLoading] = useState(false);
   const [searchText, setSearchText] = useState("");
+  const [allOrders, setAllOrders] = useState([]); // Store all orders for frontend filtering
+  const [filteredOrders, setFilteredOrders] = useState([]); // Store filtered orders
   const [statusFilter, setStatusFilter] = useState("");
+  const [remarkModalVisible, setRemarkModalVisible] = useState(false);
+  const [remarkContent, setRemarkContent] = useState("");
+  const [addingRemark, setAddingRemark] = useState(false);
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 20,
@@ -75,14 +80,47 @@ const OrderTracking = () => {
     fetchOrders();
   }, [pagination.current, pagination.pageSize, statusFilter]);
 
+  // Frontend filtering effect
+  useEffect(() => {
+    applyFrontendFilters();
+  }, [searchText, allOrders, statusFilter]);
+
+  const applyFrontendFilters = () => {
+    let filtered = [...allOrders];
+
+    // Apply phone search filter
+    if (searchText && searchText.trim()) {
+      const searchTerm = searchText.trim().toLowerCase();
+      filtered = filtered.filter(order => 
+        order.customer_phone && 
+        order.customer_phone.toLowerCase().includes(searchTerm)
+      );
+      console.log('📱 Frontend filtering by phone:', searchTerm);
+      console.log('📊 Filtered results:', filtered.length);
+    }
+
+    // Apply status filter
+    if (statusFilter) {
+      filtered = filtered.filter(order => order.status === statusFilter);
+    }
+
+    setFilteredOrders(filtered);
+    
+    // Update pagination total based on filtered results
+    setPagination(prev => ({
+      ...prev,
+      total: filtered.length,
+      current: 1 // Reset to first page when filtering
+    }));
+  };
+
   const fetchOrders = async () => {
     try {
       setLoading(true);
       const params = {
-        page: pagination.current,
-        limit: pagination.pageSize,
-        customer_name: searchText,
-        status: statusFilter,
+        page: 1, // Always fetch from first page to get all data
+        limit: 1000, // Fetch more orders for frontend filtering
+        status: '', // Remove status filter from backend, handle in frontend
       };
 
       // Role-based filtering for employees
@@ -91,13 +129,21 @@ const OrderTracking = () => {
         params.assigned_to = user.id;
       }
 
+      console.log('🔍 Fetching all orders for frontend filtering:', params);
+
       const response = await orderService.getOrders(params);
-      setOrders(response.orders || []);
-      setPagination({
-        ...pagination,
-        total: response.pagination?.total || 0,
-      });
+      console.log('📡 API Response received:', response);
+      console.log('📊 Total orders fetched:', response.orders?.length || 0);
+      
+      setAllOrders(response.orders || []);
+      
+      // Initial pagination setup
+      setPagination(prev => ({
+        ...prev,
+        total: response.orders?.length || 0,
+      }));
     } catch (error) {
+      console.error('Fetch orders error:', error);
       message.error(t("common.error"));
     } finally {
       setLoading(false);
@@ -105,8 +151,14 @@ const OrderTracking = () => {
   };
 
   const handleSearch = () => {
-    setPagination({ ...pagination, current: 1 });
-    fetchOrders();
+    console.log('🔍 Manual search triggered with text:', searchText);
+    // Frontend filtering will be triggered by useEffect
+  };
+
+  const handleClearSearch = () => {
+    setSearchText("");
+    setStatusFilter("");
+    // This will trigger the filtering effect and show all orders
   };
 
   const fetchTrackingInfo = async (orderId) => {
@@ -125,7 +177,7 @@ const OrderTracking = () => {
   const updateTrackingStatus = async (orderId) => {
     try {
       // Find the order to get its tracking ID
-      const order = orders.find(o => o.id === orderId);
+      const order = allOrders.find(o => o.id === orderId);
       if (!order || !order.ecotrack_tracking_id) {
         message.error(t("tracking.noTrackingId"));
         return;
@@ -166,7 +218,7 @@ const OrderTracking = () => {
         });
         
         // Update the local state
-        setOrders(prevOrders => 
+        setAllOrders(prevOrders => 
           prevOrders.map(o => 
             o.id === orderId 
               ? { ...o, ecotrack_status: ecotrackStatus, ecotrack_last_update: lastUpdate }
@@ -200,7 +252,7 @@ const OrderTracking = () => {
       setBulkSyncLoading(true);
       
       // Get all orders with tracking IDs (filtered by user's visibility)
-      const ordersWithTracking = orders.filter(order => order.ecotrack_tracking_id);
+      const ordersWithTracking = allOrders.filter(order => order.ecotrack_tracking_id);
       
       if (ordersWithTracking.length === 0) {
         message.warning(t("tracking.noOrdersWithTracking"));
@@ -317,6 +369,111 @@ const OrderTracking = () => {
     } finally {
       setEcotrackLoading(false);
     }
+  };
+
+  const addEcotrackRemark = async (trackingId, content) => {
+    if (!trackingId) {
+      message.error(t("tracking.remarkRequired") || "Tracking ID is required");
+      return;
+    }
+
+    if (!content || content.trim().length === 0) {
+      message.error(t("tracking.remarkContentRequired") || "Remark content is required");
+      return;
+    }
+
+    if (content.length > 255) {
+      message.error(t("tracking.remarkTooLong") || "Remark must be 255 characters or less");
+      return;
+    }
+
+    try {
+      setAddingRemark(true);
+      
+      // Use POST method as the API actually requires POST despite documentation showing GET
+      const requestBody = {
+        api_token: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
+        tracking: trackingId,
+        content: content.trim()
+      };
+
+      console.log('🔗 Adding remark to Ecotrack (POST):', 'https://app.noest-dz.com/api/public/add/maj');
+      console.log('📦 Request body:', requestBody);
+
+      const remarkResponse = await fetch('https://app.noest-dz.com/api/public/add/maj', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      console.log('📡 Response status:', remarkResponse.status);
+      console.log('📡 Response headers:', remarkResponse.headers);
+
+      if (remarkResponse.ok) {
+        let result;
+        try {
+          result = await remarkResponse.json();
+        } catch (jsonError) {
+          // If response is not JSON, get text
+          result = await remarkResponse.text();
+        }
+        
+        console.log('✅ Successfully added remark to Ecotrack:', result);
+        message.success(t("tracking.remarkAddedSuccess") || "Remark added successfully to Ecotrack");
+        
+        // Clear the remark content and close modal
+        setRemarkContent("");
+        setRemarkModalVisible(false);
+        
+        // Refresh the tracking details to show the new remark
+        if (selectedOrder?.ecotrack_tracking_id) {
+          setTimeout(() => {
+            viewEcotrackDetails(selectedOrder.ecotrack_tracking_id);
+          }, 1500); // Wait a bit longer for Ecotrack to process the update
+        }
+      } else {
+        let errorText;
+        try {
+          const errorJson = await remarkResponse.json();
+          errorText = errorJson.message || errorJson.error || `HTTP ${remarkResponse.status}`;
+        } catch {
+          errorText = await remarkResponse.text() || `HTTP ${remarkResponse.status}`;
+        }
+        
+        console.warn('⚠️ Failed to add remark to Ecotrack:', errorText);
+        message.error(t("tracking.remarkAddFailed") || `Failed to add remark: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('❌ Error adding remark to Ecotrack:', error);
+      message.error(t("tracking.remarkAddError") || `Network error: ${error.message}`);
+    } finally {
+      setAddingRemark(false);
+    }
+  };
+
+  const showRemarkModal = (order = null) => {
+    const targetOrder = order || selectedOrder;
+    
+    if (!targetOrder) {
+      message.error(t("tracking.noOrderSelected") || "No order selected");
+      return;
+    }
+    
+    if (!targetOrder.ecotrack_tracking_id) {
+      message.error(t("tracking.noTrackingId"));
+      return;
+    }
+    
+    // Set the selected order if not already set
+    if (!selectedOrder || selectedOrder.id !== targetOrder.id) {
+      setSelectedOrder(targetOrder);
+    }
+    
+    setRemarkModalVisible(true);
+    setRemarkContent("");
   };
 
   const showTrackingModal = (order) => {
@@ -607,13 +764,33 @@ const OrderTracking = () => {
       title: t("orders.customerName"),
       dataIndex: "customer_name",
       key: "customer_name",
-      width: 200,
+      width: 150,
+      ellipsis: true,
+      render: (name) => (
+        <Tooltip title={name}>
+          <Text style={{ maxWidth: '120px' }}>{name}</Text>
+        </Tooltip>
+      ),
+    },
+    {
+      title: t("orders.customerPhone"),
+      dataIndex: "customer_phone",
+      key: "customer_phone",
+      width: 120,
+      ellipsis: true,
+      responsive: ['md'],
+      render: (phone) => (
+        <Tooltip title={phone}>
+          <Text copyable={{ text: phone }} style={{ maxWidth: '100px' }}>{phone}</Text>
+        </Tooltip>
+      ),
     },
     {
       title: t("orders.status"),
       dataIndex: "status",
       key: "status",
       width: 120,
+      ellipsis: true,
       render: (status, record) => (
         <Dropdown
           overlay={getStatusMenu(record)}
@@ -630,11 +807,25 @@ const OrderTracking = () => {
               color: getStatusColor(status),
               fontSize: "12px",
               cursor: "pointer",
+              maxWidth: '100px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
             }}
           >
             <Space size="small">
               {getStatusIcon(status)}
-              <span>{t(`orders.statuses.${status}`)}</span>
+              <Tooltip title={t(`orders.statuses.${status}`)}>
+                <span style={{ 
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  maxWidth: '60px',
+                  display: 'inline-block'
+                }}>
+                  {t(`orders.statuses.${status}`)}
+                </span>
+              </Tooltip>
             </Space>
           </Button>
         </Dropdown>
@@ -645,9 +836,23 @@ const OrderTracking = () => {
       dataIndex: "ecotrack_tracking_id",
       key: "ecotrack_tracking_id",
       width: 150,
+      ellipsis: true,
+      responsive: ['lg'],
       render: (trackingId) =>
         trackingId ? (
-          <Badge status="success" text={<Text copyable>{trackingId}</Text>} />
+          <Tooltip title={trackingId}>
+            <Badge status="success" text={
+              <Text copyable style={{ 
+                maxWidth: '120px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                display: 'inline-block'
+              }}>
+                {trackingId}
+              </Text>
+            } />
+          </Tooltip>
         ) : (
           <Badge status="default" text={t("tracking.noTrackingId")} />
         ),
@@ -656,11 +861,19 @@ const OrderTracking = () => {
       title: t("tracking.ecotrackStatus"),
       dataIndex: "ecotrack_status",
       key: "ecotrack_status",
-      width: 200,
+      width: 180,
+      ellipsis: true,
+      responsive: ['xl'],
       render: (ecotrackStatus, record) =>
         ecotrackStatus ? (
           <Tooltip title={ecotrackStatus}>
-            <Tag color="blue" style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <Tag color="blue" style={{ 
+              maxWidth: '150px', 
+              overflow: 'hidden', 
+              textOverflow: 'ellipsis', 
+              whiteSpace: 'nowrap',
+              display: 'inline-block'
+            }}>
               {ecotrackStatus}
             </Tag>
           </Tooltip>
@@ -672,22 +885,35 @@ const OrderTracking = () => {
       title: t("tracking.lastUpdate"),
       dataIndex: "ecotrack_last_update",
       key: "ecotrack_last_update",
-      width: 150,
-      render: (lastUpdate) =>
-        lastUpdate
-          ? new Date(lastUpdate).toLocaleString()
-          : t("tracking.never"),
+      width: 130,
+      ellipsis: true,
+      responsive: ['xxl'],
+      render: (lastUpdate) => (
+        <Tooltip title={lastUpdate ? new Date(lastUpdate).toLocaleString() : t("tracking.never")}>
+          <Text style={{ 
+            maxWidth: '110px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            display: 'inline-block',
+            fontSize: '12px'
+          }}>
+            {lastUpdate ? new Date(lastUpdate).toLocaleDateString() : t("tracking.never")}
+          </Text>
+        </Tooltip>
+      ),
     },
     {
       title: t("common.actions"),
       key: "actions",
-      width: 200,
+      width: 120,
       fixed: "right",
       render: (_, record) => (
-        <Space>
+        <Space size="small">
           <Tooltip title={t("tracking.viewDetails")}>
             <Button
               type="link"
+              size="small"
               icon={<EyeOutlined />}
               onClick={() => showTrackingModal(record)}
             />
@@ -696,8 +922,25 @@ const OrderTracking = () => {
             <Tooltip title={t("tracking.syncStatus")}>
               <Button
                 type="link"
+                size="small"
                 icon={<SyncOutlined />}
                 onClick={() => updateTrackingStatus(record.id)}
+              />
+            </Tooltip>
+          )}
+          {record.ecotrack_tracking_id && (
+            <Tooltip title={t("tracking.addRemark") || "Add Remark"}>
+              <Button
+                type="link"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => {
+                  if (record.ecotrack_tracking_id) {
+                    showRemarkModal(record);
+                  } else {
+                    message.error(t("tracking.noTrackingId"));
+                  }
+                }}
               />
             </Tooltip>
           )}
@@ -705,6 +948,15 @@ const OrderTracking = () => {
       ),
     },
   ];
+
+  // Get paginated data from filtered orders
+  const getPaginatedOrders = () => {
+    const startIndex = (pagination.current - 1) * pagination.pageSize;
+    const endIndex = startIndex + pagination.pageSize;
+    return filteredOrders.slice(startIndex, endIndex);
+  };
+
+  const paginatedOrders = getPaginatedOrders();
 
   return (
     <div className="order-tracking-page">
@@ -741,7 +993,7 @@ const OrderTracking = () => {
         <Row gutter={16}>
           <Col xs={24} sm={12} md={8}>
             <Input
-              placeholder={t("orders.searchPlaceholder")}
+              placeholder={t("orders.searchByPhone") || "Search by phone number..."}
               prefix={<SearchOutlined />}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
@@ -753,7 +1005,10 @@ const OrderTracking = () => {
               placeholder={t("orders.filterByStatus")}
               style={{ width: "100%" }}
               value={statusFilter}
-              onChange={setStatusFilter}
+              onChange={(value) => {
+                setStatusFilter(value || "");
+                console.log('🏷️ Status filter changed:', value);
+              }}
               allowClear
             >
               <Option value="pending">{t("orders.statuses.pending")}</Option>
@@ -806,8 +1061,11 @@ const OrderTracking = () => {
               >
                 {t("common.search")}
               </Button>
-              <Button onClick={fetchOrders} icon={<ReloadOutlined />}>
-                {t("common.refresh")}
+              <Button
+                onClick={handleClearSearch}
+                icon={<ReloadOutlined />}
+              >
+                {t("common.clear")}
               </Button>
             </Space>
           </Col>
@@ -818,21 +1076,29 @@ const OrderTracking = () => {
       <Card>
         <Table
           columns={columns}
-          dataSource={orders}
+          dataSource={paginatedOrders}
           rowKey="id"
           loading={loading}
           size="small"
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
-            total: pagination.total,
+            total: filteredOrders.length, // Use filtered orders length
             showSizeChanger: true,
             showQuickJumper: true,
             onChange: (page, pageSize) => {
               setPagination({ ...pagination, current: page, pageSize });
             },
+            showTotal: (total, range) => 
+              `${range[0]}-${range[1]} of ${total} items${searchText ? ` (filtered from ${allOrders.length})` : ''}`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            responsive: true,
           }}
-          scroll={{ x: 1200 }}
+          scroll={{ 
+            x: 800, // Minimum width for horizontal scroll
+            y: window.innerHeight - 400 // Dynamic height based on screen
+          }}
+          tableLayout="fixed" // Fixed layout for better text overflow handling
         />
       </Card>
 
@@ -856,6 +1122,16 @@ const OrderTracking = () => {
           <Button key="close" onClick={() => setTrackingModalVisible(false)}>
             {t("common.close")}
           </Button>,
+          selectedOrder?.ecotrack_tracking_id && (
+            <Button
+              key="addRemark"
+              type="default"
+              icon={<EditOutlined />}
+              onClick={() => showRemarkModal()}
+            >
+              {t("tracking.addRemark") || "Add Remark"}
+            </Button>
+          ),
           selectedOrder?.ecotrack_tracking_id && (
             <Button
               key="sync"
@@ -886,6 +1162,50 @@ const OrderTracking = () => {
         width={800}
       >
         {renderTrackingContent()}
+      </Modal>
+
+      {/* Add Remark Modal */}
+      <Modal
+        title={
+          <Space>
+            <EditOutlined />
+            {t("tracking.addRemark") || "Add Remark to Ecotrack"}
+            {selectedOrder && ` - ${selectedOrder.ecotrack_tracking_id}`}
+          </Space>
+        }
+        open={remarkModalVisible}
+        onCancel={() => {
+          setRemarkModalVisible(false);
+          setRemarkContent("");
+        }}
+        onOk={() => {
+          if (selectedOrder?.ecotrack_tracking_id) {
+            addEcotrackRemark(selectedOrder.ecotrack_tracking_id, remarkContent);
+          }
+        }}
+        confirmLoading={addingRemark}
+        okText={t("tracking.addRemark") || "Add Remark"}
+        cancelText={t("common.cancel")}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>{t("tracking.remarkInstructions") || "Add a remark or update to this Ecotrack shipment:"}</Text>
+        </div>
+        <Input.TextArea
+          value={remarkContent}
+          onChange={(e) => setRemarkContent(e.target.value)}
+          placeholder={t("tracking.remarkPlaceholder") || "Enter your remark or update (max 255 characters)..."}
+          rows={4}
+          maxLength={255}
+          showCount
+        />
+        {selectedOrder?.ecotrack_tracking_id && (
+          <div style={{ marginTop: 12, padding: 8, backgroundColor: '#f5f5f5', borderRadius: 4 }}>
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              <strong>{t("tracking.trackingId")}:</strong> {selectedOrder.ecotrack_tracking_id}
+            </Text>
+          </div>
+        )}
       </Modal>
     </div>
   );

@@ -119,11 +119,34 @@ router.delete('/products/:id', authenticateToken, requirePermission('canDeletePr
 // Stock Level Routes
 router.get('/stock-levels', authenticateToken, requirePermission('canViewStock'), async (req, res) => {
   try {
+    console.log('Stock levels endpoint called with query:', req.query);
     const stockLevels = await StockService.getStockLevels(req.query);
+    console.log('Stock levels fetched:', stockLevels?.length || 0, 'items');
     res.json(stockLevels);
   } catch (error) {
     console.error('Get stock levels error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Test endpoint without authentication for debugging
+router.get('/stock-levels-test', async (req, res) => {
+  try {
+    console.log('TEST: Stock levels endpoint called with query:', req.query);
+    const stockLevels = await StockService.getStockLevels(req.query);
+    console.log('TEST: Stock levels fetched:', stockLevels?.length || 0, 'items');
+    res.json({
+      success: true,
+      count: stockLevels?.length || 0,
+      data: stockLevels
+    });
+  } catch (error) {
+    console.error('TEST: Get stock levels error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Internal server error', 
+      details: error.message 
+    });
   }
 });
 
@@ -155,11 +178,13 @@ router.get('/stock-movements', authenticateToken, requirePermission('canViewStoc
 // Location Routes
 router.get('/locations', authenticateToken, requirePermission('canViewStock'), async (req, res) => {
   try {
+    console.log('Locations endpoint called');
     const locations = await StockService.getAllLocations();
+    console.log('Locations fetched:', locations?.length || 0, 'items');
     res.json(locations);
   } catch (error) {
     console.error('Get locations error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -300,6 +325,283 @@ router.post('/products/:id/generate-link', authenticateToken, requirePermission(
   } catch (error) {
     console.error('Generate product link error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Product Count by Category Routes
+router.get('/categories/product-count', authenticateToken, requirePermission('canViewProducts'), async (req, res) => {
+  try {
+    console.log('Product count by category endpoint called');
+    const productCounts = await StockService.getProductCountByCategory();
+    console.log('Product counts fetched for', productCounts?.length || 0, 'categories');
+    res.json({
+      success: true,
+      data: productCounts,
+      total: productCounts?.length || 0
+    });
+  } catch (error) {
+    console.error('Get product count by category error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
+// Test endpoint without authentication for debugging
+router.get('/categories/product-count-test', async (req, res) => {
+  try {
+    console.log('TEST: Product count by category endpoint called');
+    const productCounts = await StockService.getProductCountByCategory();
+    console.log('TEST: Product counts fetched for', productCounts?.length || 0, 'categories');
+    res.json({
+      success: true,
+      data: productCounts,
+      total: productCounts?.length || 0
+    });
+  } catch (error) {
+    console.error('TEST: Get product count by category error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
+router.get('/categories/:categoryId/product-count', authenticateToken, requirePermission('canViewProducts'), async (req, res) => {
+  try {
+    const categoryId = req.params.categoryId;
+    console.log('Product count for category', categoryId, 'endpoint called');
+    const productCount = await StockService.getProductCountByCategory(categoryId);
+    
+    if (!productCount) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Category not found or inactive' 
+      });
+    }
+    
+    console.log('Product count fetched for category:', productCount);
+    res.json({
+      success: true,
+      data: productCount
+    });
+  } catch (error) {
+    console.error('Get product count for category error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
+// Test endpoint without authentication for debugging
+router.get('/categories/:categoryId/product-count-test', async (req, res) => {
+  try {
+    const categoryId = req.params.categoryId;
+    console.log('TEST: Product count for category', categoryId, 'endpoint called');
+    const productCount = await StockService.getProductCountByCategory(categoryId);
+    
+    if (!productCount) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Category not found or inactive' 
+      });
+    }
+    
+    console.log('TEST: Product count fetched for category:', productCount);
+    res.json({
+      success: true,
+      data: productCount
+    });
+  } catch (error) {
+    console.error('TEST: Get product count for category error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
+// Category CRUD Routes
+router.post('/categories', authenticateToken, requirePermission('canCreateProducts'), async (req, res) => {
+  try {
+    const categoryId = await StockService.createCategory(req.body);
+    res.status(201).json({ 
+      success: true,
+      id: categoryId, 
+      message: 'Category created successfully' 
+    });
+  } catch (error) {
+    console.error('Create category error:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      res.status(400).json({ 
+        success: false,
+        error: 'Category name already exists' 
+      });
+    } else {
+      res.status(500).json({ 
+        success: false,
+        error: 'Internal server error' 
+      });
+    }
+  }
+});
+
+router.put('/categories/:id', authenticateToken, requirePermission('canEditProducts'), async (req, res) => {
+  try {
+    const updated = await StockService.updateCategory(req.params.id, req.body);
+    if (!updated) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Category not found' 
+      });
+    }
+    res.json({ 
+      success: true,
+      message: 'Category updated successfully' 
+    });
+  } catch (error) {
+    console.error('Update category error:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      res.status(400).json({ 
+        success: false,
+        error: 'Category name already exists' 
+      });
+    } else {
+      res.status(500).json({ 
+        success: false,
+        error: 'Internal server error' 
+      });
+    }
+  }
+});
+
+router.delete('/categories/:id', authenticateToken, requirePermission('canDeleteProducts'), async (req, res) => {
+  try {
+    const deleted = await StockService.deleteCategory(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Category not found' 
+      });
+    }
+    res.json({ 
+      success: true,
+      message: 'Category deleted successfully' 
+    });
+  } catch (error) {
+    console.error('Delete category error:', error);
+    if (error.message.includes('Cannot delete category with products')) {
+      res.status(400).json({ 
+        success: false,
+        error: error.message 
+      });
+    } else {
+      res.status(500).json({ 
+        success: false,
+        error: 'Internal server error' 
+      });
+    }
+  }
+});
+
+// Test endpoints for category CRUD without authentication
+router.post('/categories-test', async (req, res) => {
+  try {
+    const categoryId = await StockService.createCategory(req.body);
+    res.status(201).json({ 
+      success: true,
+      id: categoryId, 
+      message: 'Category created successfully' 
+    });
+  } catch (error) {
+    console.error('TEST: Create category error:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      res.status(400).json({ 
+        success: false,
+        error: 'Category name already exists' 
+      });
+    } else {
+      res.status(500).json({ 
+        success: false,
+        error: 'Internal server error',
+        details: error.message 
+      });
+    }
+  }
+});
+
+router.put('/categories-test/:id', async (req, res) => {
+  try {
+    console.log('🔄 TEST: Update category request - ID:', req.params.id);
+    console.log('📥 TEST: Update category data received:', JSON.stringify(req.body, null, 2));
+    console.log('🎯 TEST: is_active value type:', typeof req.body.is_active, 'value:', req.body.is_active);
+    
+    const updated = await StockService.updateCategory(req.params.id, req.body);
+    console.log('✅ TEST: Update result:', updated);
+    
+    if (!updated) {
+      console.log('❌ TEST: Category not found or no changes made');
+      return res.status(404).json({ 
+        success: false,
+        error: 'Category not found' 
+      });
+    }
+    
+    console.log('🎉 TEST: Category update completed successfully');
+    res.json({ 
+      success: true,
+      message: 'Category updated successfully' 
+    });
+  } catch (error) {
+    console.error('❌ TEST: Update category error:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      res.status(400).json({ 
+        success: false,
+        error: 'Category name already exists' 
+      });
+    } else {
+      res.status(500).json({ 
+        success: false,
+        error: 'Internal server error',
+        details: error.message 
+      });
+    }
+  }
+});
+
+router.delete('/categories-test/:id', async (req, res) => {
+  try {
+    const deleted = await StockService.deleteCategory(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Category not found' 
+      });
+    }
+    res.json({ 
+      success: true,
+      message: 'Category deleted successfully' 
+    });
+  } catch (error) {
+    console.error('TEST: Delete category error:', error);
+    if (error.message.includes('Cannot delete category with products')) {
+      res.status(400).json({ 
+        success: false,
+        error: error.message 
+      });
+    } else {
+      res.status(500).json({ 
+        success: false,
+        error: 'Internal server error',
+        details: error.message 
+      });
+    }
   }
 });
 

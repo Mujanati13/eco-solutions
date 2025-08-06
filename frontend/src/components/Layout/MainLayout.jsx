@@ -176,13 +176,13 @@ const MainLayout = () => {
       })
     }
 
-    // Ecotrack - only if user can view integrations
-    if (hasPermission('canViewIntegrations')) {
-      integrationsSubmenuItems.push({
-        key: '/integrations/ecotrack',
-        label: t('navigation.ecotrack'),
-      })
-    }
+    // Ecotrack - DISABLED
+    // if (hasPermission('canViewIntegrations')) {
+    //   integrationsSubmenuItems.push({
+    //     key: '/integrations/ecotrack',
+    //     label: t('navigation.ecotrack'),
+    //   })
+    // }
 
     // Only show integrations menu if there are items in it
     if (integrationsSubmenuItems.length > 0) {

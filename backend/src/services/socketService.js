@@ -12,15 +12,26 @@ class SocketService {
 
   // Initialize Socket.IO server
   initialize(server) {
+    const allowedOrigins = process.env.NODE_ENV === 'production' 
+      ? [
+          process.env.FRONTEND_URL || 'https://yourdomain.com',
+          process.env.CLIENT_URL || 'https://yourdomain.com'
+        ]
+      : [
+          'http://localhost:3000',
+          'http://localhost:5173',
+          'http://127.0.0.1:3000',
+          'http://127.0.0.1:5173'
+        ];
+
     this.io = new Server(server, {
       cors: {
-        origin: process.env.NODE_ENV === 'production' 
-          ? ['https://yourdomain.com'] 
-          : ['http://localhost:3000'],
+        origin: allowedOrigins,
         credentials: true
       },
       pingTimeout: 60000,
-      pingInterval: 25000
+      pingInterval: 25000,
+      transports: ['websocket', 'polling']
     });
 
     this.setupSocketHandlers();

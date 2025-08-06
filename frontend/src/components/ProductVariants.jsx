@@ -135,7 +135,7 @@ const ProductVariants = ({ product, visible, onClose }) => {
       const response = await variantService.getVariantsByProduct(product.id, { with_stock: true });
       setVariants(response.data.variants);
     } catch (error) {
-      message.error(t('common.error.fetchFailed'));
+      message.error(t('common.fetchFailed'));
       console.error('Error fetching variants:', error);
     } finally {
       setLoading(false);
@@ -159,6 +159,7 @@ const ProductVariants = ({ product, visible, onClose }) => {
     setEditingVariant(variant);
     form.setFieldsValue({
       ...variant,
+      current_stock: variant.total_stock || variant.current_stock || 0, // Map total_stock to current_stock for form
       attributes: variant.attributes ? JSON.parse(variant.attributes) : {}
     });
     setModalVisible(true);
@@ -170,17 +171,17 @@ const ProductVariants = ({ product, visible, onClose }) => {
       setViewingVariant(response.data.variant);
       setStockModalVisible(true);
     } catch (error) {
-      message.error(t('common.error.fetchFailed'));
+      message.error(t('common.fetchFailed'));
     }
   };
 
   const handleDelete = async (variant) => {
     try {
       await variantService.deleteVariant(variant.id);
-      message.success(t('common.success.deleted'));
+      message.success(t('common.deleted'));
       fetchVariants();
     } catch (error) {
-      message.error(error.message || t('common.error.deleteFailed'));
+      message.error(error.message || t('common.deleteFailed'));
     }
   };
 
@@ -217,6 +218,15 @@ const ProductVariants = ({ product, visible, onClose }) => {
         cleanedValues.dimensions = null;
       }
 
+      // Handle boolean fields - ensure is_active is a proper boolean
+      console.log('Raw is_active value:', values.is_active, 'type:', typeof values.is_active);
+      if (cleanedValues.is_active !== undefined) {
+        cleanedValues.is_active = Boolean(cleanedValues.is_active);
+      }
+      console.log('After boolean conversion - is_active:', cleanedValues.is_active, 'type:', typeof cleanedValues.is_active);
+
+      console.log('Cleaned values before saving variant:', cleanedValues);
+
       // Validate variant data
       const errors = variantService.validateVariant(cleanedValues);
       if (errors.length > 0) {
@@ -226,10 +236,10 @@ const ProductVariants = ({ product, visible, onClose }) => {
 
       if (editingVariant) {
         await variantService.updateVariant(editingVariant.id, cleanedValues);
-        message.success(t('common.success.updated'));
+        message.success(t('common.updated'));
       } else {
         await variantService.createVariant(cleanedValues);
-        message.success(t('common.success.created'));
+        message.success(t('common.created'));
       }
       setModalVisible(false);
       fetchVariants();
@@ -249,12 +259,12 @@ const ProductVariants = ({ product, visible, onClose }) => {
         } else if (error.error) {
           message.error(error.error);
         } else {
-          message.error(t('common.error.saveFailed'));
+          message.error(t('common.saveFailed'));
         }
       } else if (typeof error === 'string') {
         message.error(error);
       } else {
-        message.error(t('common.error.saveFailed'));
+        message.error(t('common.saveFailed'));
       }
     }
   };

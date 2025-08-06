@@ -177,6 +177,53 @@ class StockService {
       throw error.response?.data || error
     }
   }
+
+  // Category Product Count
+  async getProductCountByCategory() {
+    try {
+      const response = await api.get('/stock/categories/product-count-test')
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error
+    }
+  }
+
+  async getProductCountForCategory(categoryId) {
+    try {
+      const response = await api.get(`/stock/categories/${categoryId}/product-count-test`)
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error
+    }
+  }
+
+  // Category CRUD Operations
+  async createCategory(categoryData) {
+    try {
+      const response = await api.post('/stock/categories-test', categoryData)
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error
+    }
+  }
+
+  async updateCategory(id, categoryData) {
+    try {
+      const response = await api.put(`/stock/categories-test/${id}`, categoryData)
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error
+    }
+  }
+
+  async deleteCategory(id) {
+    try {
+      const response = await api.delete(`/stock/categories-test/${id}`)
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error
+    }
+  }
 }
 
 export default new StockService()

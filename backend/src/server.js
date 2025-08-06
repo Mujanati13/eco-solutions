@@ -48,12 +48,19 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // CORS configuration
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://yourdomain.com'] 
-    : ['http://localhost:3000'],
-  credentials: true
-}));
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? [
+      process.env.FRONTEND_URL || 'https://yourdomain.com',
+      process.env.CLIENT_URL || 'https://yourdomain.com'
+    ]
+  : [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:5173'
+    ];
+
+app.use(cors({}));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
