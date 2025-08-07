@@ -89,6 +89,13 @@ class GoogleAuthService {
             return newTokens;
           } catch (error) {
             console.error('Failed to refresh tokens:', error);
+            
+            // If refresh token is expired, clear the tokens
+            if (error.message === 'REFRESH_TOKEN_EXPIRED') {
+              console.log('Refresh token expired, user needs to re-authenticate');
+              return null;
+            }
+            
             return null;
           }
         } else {
@@ -123,6 +130,15 @@ class GoogleAuthService {
       return credentials;
     } catch (error) {
       console.error('Error refreshing tokens:', error);
+      
+      // Handle specific error cases
+      if (error.code === 400 && (error.message?.includes('invalid_grant') || error.response?.data?.error === 'invalid_grant')) {
+        // Refresh token is invalid/expired - user needs to re-authenticate
+        console.log(`Refresh token expired for user ${userId}. Clearing stored tokens.`);
+        await this.clearUserTokens(userId);
+        throw new Error('REFRESH_TOKEN_EXPIRED');
+      }
+      
       throw new Error('Failed to refresh tokens');
     }
   }
@@ -151,11 +167,38 @@ class GoogleAuthService {
     }
   }
 
+  // Clear user tokens from database
+  async clearUserTokens(userId) {
+    try {
+      const query = 'DELETE FROM google_user_tokens WHERE user_id = ?';
+      await pool.execute(query, [userId]);
+      console.log(`Cleared tokens for user ${userId}`);
+    } catch (error) {
+      console.error('Error clearing user tokens:', error);
+      throw error;
+    }
+  }
+
   // Check if user has valid Google authentication
   async isUserAuthenticated(userId) {
     try {
       const tokens = await this.getUserTokens(userId);
-      return tokens !== null;
+      
+      // If no tokens, user is not authenticated
+      if (!tokens) {
+        return false;
+      }
+      
+      // Additional check: try to create a sheets client to verify tokens work
+      try {
+        const sheetsClient = await this.getSheetsClient(userId);
+        return true;
+      } catch (error) {
+        // If sheets client creation fails, tokens are invalid
+        console.log(`Tokens invalid for user ${userId}, clearing...`);
+        await this.clearUserTokens(userId);
+        return false;
+      }
     } catch (error) {
       console.error('Error checking user authentication:', error);
       return false;

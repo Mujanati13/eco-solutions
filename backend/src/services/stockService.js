@@ -4,10 +4,10 @@ class StockService {
   // Product Management
   static async getAllProducts(filters = {}) {
     try {
-      const { page = 1, limit = 20, search, category, brand, is_active, low_stock } = filters;
+      const { page = 1, limit = 100, search, category, brand, is_active, low_stock } = filters;
       
       const validPage = Math.max(1, parseInt(page) || 1);
-      const validLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
+      const validLimit = Math.min(500, Math.max(1, parseInt(limit) || 100));
       const offset = (validPage - 1) * validLimit;
 
       let whereClause = '1=1';

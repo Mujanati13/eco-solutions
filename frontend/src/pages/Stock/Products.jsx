@@ -83,7 +83,9 @@ const Products = () => {
   const fetchProducts = async (search = '') => {
     setLoading(true)
     try {
-      const params = {}
+      const params = {
+        limit: 100, // Get more products by default
+      }
       if (search) {
         params.search = search
       }
@@ -772,9 +774,10 @@ const Products = () => {
           size='small'
           pagination={{
             total: products.length,
-            pageSize: 10,
+            pageSize: 25,
             showSizeChanger: true,
             showQuickJumper: true,
+            pageSizeOptions: ['10', '25', '50', '100'],
             showTotal: (total, range) =>
               `${range[0]}-${range[1]} ${t('common.of')} ${total} ${t('common.items')}`,
           }}

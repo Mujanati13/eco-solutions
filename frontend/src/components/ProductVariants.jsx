@@ -190,6 +190,10 @@ const ProductVariants = ({ product, visible, onClose }) => {
       // Clean up form values - convert empty strings to null for numeric fields
       const cleanedValues = { ...values };
       
+      // Extract current_stock for separate handling
+      const currentStock = cleanedValues.current_stock;
+      delete cleanedValues.current_stock; // Remove from main variant data
+      
       // Handle numeric fields
       if (cleanedValues.weight === '' || cleanedValues.weight === undefined) {
         cleanedValues.weight = null;
@@ -226,6 +230,7 @@ const ProductVariants = ({ product, visible, onClose }) => {
       console.log('After boolean conversion - is_active:', cleanedValues.is_active, 'type:', typeof cleanedValues.is_active);
 
       console.log('Cleaned values before saving variant:', cleanedValues);
+      console.log('Current stock value:', currentStock);
 
       // Validate variant data
       const errors = variantService.validateVariant(cleanedValues);
@@ -234,13 +239,56 @@ const ProductVariants = ({ product, visible, onClose }) => {
         return;
       }
 
+      let variantId;
+      
       if (editingVariant) {
+        // Update existing variant
         await variantService.updateVariant(editingVariant.id, cleanedValues);
+        variantId = editingVariant.id;
+        
+        // Update stock if it has changed and we have a valid stock value
+        if (currentStock !== undefined && currentStock !== null) {
+          const originalStock = editingVariant.total_stock || editingVariant.current_stock || 0;
+          if (parseInt(currentStock) !== parseInt(originalStock)) {
+            try {
+              // Update stock level (assuming location_id = 1 as default)
+              await variantService.updateVariantStock(variantId, 1, {
+                quantity: parseInt(currentStock) || 0,
+                minimum_stock_level: null,
+                maximum_stock_level: null
+              });
+              console.log('Stock updated successfully');
+            } catch (stockError) {
+              console.error('Stock update failed:', stockError);
+              message.warning(t('variants.stockUpdateFailed') || 'Variant updated but stock update failed');
+            }
+          }
+        }
+        
         message.success(t('common.updated'));
       } else {
-        await variantService.createVariant(cleanedValues);
+        // Create new variant
+        const result = await variantService.createVariant(cleanedValues);
+        variantId = result.id || result.data?.id;
+        
+        // Set initial stock if provided
+        if (currentStock !== undefined && currentStock !== null && variantId) {
+          try {
+            await variantService.updateVariantStock(variantId, 1, {
+              quantity: parseInt(currentStock) || 0,
+              minimum_stock_level: null,
+              maximum_stock_level: null
+            });
+            console.log('Initial stock set successfully');
+          } catch (stockError) {
+            console.error('Initial stock setting failed:', stockError);
+            message.warning(t('variants.initialStockFailed') || 'Variant created but initial stock setting failed');
+          }
+        }
+        
         message.success(t('common.created'));
       }
+      
       setModalVisible(false);
       fetchVariants();
     } catch (error) {

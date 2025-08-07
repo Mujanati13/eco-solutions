@@ -1,5 +1,6 @@
 const { google } = require('googleapis');
 const googleAuthService = require('./googleAuth');
+const DeliveryPricingService = require('./deliveryPricingService');
 
 class GoogleSheetsService {
   constructor() {
@@ -178,6 +179,39 @@ class GoogleSheetsService {
     return await this.previewSheetData(userId, spreadsheetId, null, range);
   }
 
+  // Map French delivery type text to database enum values
+  mapDeliveryType(deliveryTypeText) {
+    if (!deliveryTypeText || typeof deliveryTypeText !== 'string') {
+      return 'home'; // default value
+    }
+
+    const type = deliveryTypeText.toLowerCase().trim();
+    
+    // Map French delivery types to enum values
+    if (type.includes('stop desk') || type.includes('stopdesk') || type.includes('stop-desk')) {
+      return 'pickup_point';
+    } else if (type.includes('domicile') || type.includes('home') || type.includes('maison')) {
+      return 'home';
+    } else if (type.includes('bureau') || type.includes('office') || type.includes('travail')) {
+      return 'office';
+    } else if (type.includes('express') || type.includes('rapide')) {
+      return 'express';
+    } else if (type.includes('standard') || type.includes('normal')) {
+      return 'standard';
+    } else if (type.includes('overnight') || type.includes('nuit')) {
+      return 'overnight';
+    } else if (type.includes('weekend') || type.includes('week-end')) {
+      return 'weekend';
+    } else if (type.includes('economy') || type.includes('economique')) {
+      return 'economy';
+    } else if (type.includes('les changes') || type.includes('les_changes')) {
+      return 'les_changes';
+    } else {
+      // Default to home delivery if type not recognized
+      return 'home';
+    }
+  }
+
   // Import orders from a Google Sheet
   async importOrdersFromSheet(spreadsheetId, sheetRange, userId) {
     try {
@@ -185,7 +219,7 @@ class GoogleSheetsService {
       const { pool } = require('../../config/database');
       
       // Get all data from the sheet
-      const range = sheetRange || 'Orders!A2:L';
+      const range = sheetRange || 'Orders!A2:M'; // Extended to column M for delivery_type
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: spreadsheetId,
         range: range
@@ -228,6 +262,7 @@ class GoogleSheetsService {
             notes: row[9] || '', // remarque
             weight: parseFloat(row[10]) || 0, // poids (en kg)
             metro_delivery: row[11] && String(row[11]).toLowerCase().includes('oui') ? 1 : 0, // metro delivery (0 or 1)
+            delivery_type: this.mapDeliveryType(row[12] || ''), // Type de Livraison
             status: 'pending',
             payment_status: 'cod_pending'
           };
@@ -260,14 +295,104 @@ class GoogleSheetsService {
             metro_delivery: orderData.metro_delivery
           };
 
+          // Look up wilaya_id from wilaya_code for proper database relationships
+          let wilayaId = null;
+          if (orderData.wilaya_code) {
+            try {
+              // First try to find by exact code match
+              const [wilayaResult] = await pool.query(
+                'SELECT id FROM wilayas WHERE code = ?',
+                [orderData.wilaya_code]
+              );
+              
+              if (wilayaResult.length > 0) {
+                wilayaId = wilayaResult[0].id;
+              } else {
+                // If no exact match, try to find by partial name match
+                const [wilayaNameResult] = await pool.query(
+                  'SELECT id FROM wilayas WHERE LOWER(name_fr) LIKE ? OR LOWER(name_en) LIKE ? OR code = ?',
+                  [`%${orderData.wilaya_code.toLowerCase()}%`, `%${orderData.wilaya_code.toLowerCase()}%`, orderData.wilaya_code.padStart(2, '0')]
+                );
+                
+                if (wilayaNameResult.length > 0) {
+                  wilayaId = wilayaNameResult[0].id;
+                }
+              }
+            } catch (wilayaError) {
+              console.warn(`Could not resolve wilaya_id for code: ${orderData.wilaya_code}`, wilayaError);
+            }
+          }
+
+          // Look up baladia_id from customer_city for proper database relationships
+          let baladiaId = null;
+          if (orderData.customer_city && orderData.customer_city.trim()) {
+            try {
+              // First try to find by exact code match (if customer_city contains a code)
+              const [baladiaCodeResult] = await pool.query(
+                'SELECT id FROM baladias WHERE code = ?',
+                [orderData.customer_city.trim()]
+              );
+              
+              if (baladiaCodeResult.length > 0) {
+                baladiaId = baladiaCodeResult[0].id;
+              } else {
+                // If no exact code match, try to find by name match
+                const cityName = orderData.customer_city.trim().toLowerCase();
+                let baladiaNameQuery = `
+                  SELECT id FROM baladias 
+                  WHERE LOWER(name_ar) LIKE ? OR LOWER(name_fr) LIKE ? OR LOWER(name_en) LIKE ?
+                `;
+                let queryParams = [`%${cityName}%`, `%${cityName}%`, `%${cityName}%`];
+                
+                // If we have a wilaya_id, restrict baladia search to that wilaya
+                if (wilayaId) {
+                  baladiaNameQuery += ' AND wilaya_id = ?';
+                  queryParams.push(wilayaId);
+                }
+                
+                baladiaNameQuery += ' LIMIT 1';
+                
+                const [baladiaNameResult] = await pool.query(baladiaNameQuery, queryParams);
+                
+                if (baladiaNameResult.length > 0) {
+                  baladiaId = baladiaNameResult[0].id;
+                }
+              }
+            } catch (baladiaError) {
+              console.warn(`Could not resolve baladia_id for city: ${orderData.customer_city}`, baladiaError);
+            }
+          }
+
+          // Calculate delivery price based on wilaya and delivery type
+          let deliveryPrice = 0;
+          if (wilayaId) {
+            try {
+              const pricingResult = await DeliveryPricingService.calculateDeliveryPrice(
+                wilayaId,
+                orderData.delivery_type || 'home',
+                orderData.weight || 1.0,
+                0 // volume - default to 0
+              );
+              deliveryPrice = pricingResult.price;
+              console.log(`✅ Calculated delivery price for wilaya ${wilayaId}: ${deliveryPrice} DA`);
+            } catch (pricingError) {
+              console.warn(`Could not calculate delivery price for wilaya ${wilayaId}:`, pricingError);
+              // Use default pricing if calculation fails
+              deliveryPrice = 500; // Default delivery price
+            }
+          } else {
+            // Default pricing when no wilaya found
+            deliveryPrice = 500;
+          }
+
           // Insert into database with French format mapping
           const [result] = await pool.query(`
             INSERT INTO orders (
               order_number, customer_name, customer_phone, customer_address,
               customer_city, product_details, total_amount, status,
               payment_status, notes, created_at, assigned_to,
-              wilaya_code, weight, metro_delivery
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?)
+              wilaya_code, wilaya_id, baladia_id, weight, metro_delivery, delivery_type, delivery_price
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?)
           `, [
             orderData.order_number,
             orderData.customer_name,
@@ -281,8 +406,12 @@ class GoogleSheetsService {
             orderData.notes,
             null, // assigned_to - NOT assigned to anyone
             orderData.wilaya_code,
+            wilayaId, // resolved wilaya_id for proper relationships
+            baladiaId, // resolved baladia_id for proper relationships
             orderData.weight,
-            orderData.metro_delivery
+            orderData.metro_delivery,
+            orderData.delivery_type,
+            deliveryPrice // calculated delivery price
           ]);
 
           imported.push({
@@ -366,12 +495,13 @@ class GoogleSheetsService {
         order.payment_status,
         new Date(order.created_at).toISOString(),
         order.delivery_date || '',
-        order.notes || ''
+        order.notes || '',
+        order.delivery_type || 'home' // Type de Livraison
       ]);
 
       const response = await sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
-        range: 'Orders!A:L',
+        range: 'Orders!A:M', // Extended to column M for delivery_type
         valueInputOption: 'RAW',
         resource: {
           values

@@ -1922,7 +1922,7 @@ const OrderManagement = () => {
                   🔍 {t("orders.productSelection")}
                 </Text>
                 <Row gutter={[12, 8]}>
-                  <Col span={12}>
+                  {/* <Col span={12}>
                     <Form.Item
                       name={['product_info', 'sku']}
                       label={t("orders.productSku")}
@@ -1945,7 +1945,7 @@ const OrderManagement = () => {
                         ))}
                       </Select>
                     </Form.Item>
-                  </Col>
+                  </Col> */}
                   <Col span={12}>
                     <Form.Item
                       name={['product_info', 'name']}

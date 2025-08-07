@@ -217,7 +217,11 @@
     "sortOrderPlaceholder": "أدخل ترتيب العرض (0-999)",
     "categoryHasProducts": "تحتوي هذه الفئة على {{count}} منتجات",
     "emptyCategory": "فئة فارغة",
-    "highProductCategory": "عدد كبير من المنتجات"
+    "highProductCategory": "عدد كبير من المنتجات",
+    "bulkActionsAvailable": "الإجراءات المجمعة متاحة",
+    "bulkDelete": "حذف المحدد",
+    "bulkDeleteConfirm": "حذف {{count}} فئات؟",
+    "bulkDeleteWarning": "لا يمكن التراجع عن هذا الإجراء."
   },
   "variants": {
     "title": "متغيرات المنتج",
@@ -231,6 +235,8 @@
     "quickVariantsCreated": "تم إنشاء المتغيرات السريعة بنجاح",
     "productCreatedVariantsFailed": "تم إنشاء المنتج ولكن فشل في إنشاء بعض المتغيرات",
     "variantsWillBeCreated": "سيتم إنشاء المتغيرات",
+    "stockUpdateFailed": "تم تحديث المتغير ولكن فشل تحديث المخزون",
+    "initialStockFailed": "تم إنشاء المتغير ولكن فشل تعيين المخزون الأولي",
     "noLocationsAvailable": "لا توجد مواقع متاحة",
     "variantName": "اسم المتغير",
     "variantNamePlaceholder": "أدخل اسم المتغير",
@@ -401,6 +407,7 @@
     "customerAddress": "عنوان العميل",
     "customerCity": "مدينة العميل",
     "totalAmount": "المبلغ الإجمالي",
+    "wilayaCode": "كود الولاية",
     "status": "الحالة",
     "assignedTo": "مُعيّن إلى",
     "createdAt": "تاريخ الإنشاء",

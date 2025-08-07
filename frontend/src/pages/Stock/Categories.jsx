@@ -50,6 +50,10 @@ const Categories = () => {
   const [editingCategory, setEditingCategory] = useState(null)
   const [form] = Form.useForm()
   const [modalLoading, setModalLoading] = useState(false)
+  
+  // Multi-select states
+  const [selectedRowKeys, setSelectedRowKeys] = useState([])
+  const [bulkActionVisible, setBulkActionVisible] = useState(false)
 
   useEffect(() => {
     fetchCategories()
@@ -60,35 +64,28 @@ const Categories = () => {
     try {
       console.log('🏷️ Fetching categories...')
       
-      // Use direct fetch to bypass authentication for now
-      const response = await fetch('http://localhost:5000/api/stock/categories/product-count-test')
-      console.log('🏷️ Response status:', response.status)
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      
-      const result = await response.json()
+      // Use stockService like in Products.jsx
+      const result = await stockService.getProductCountByCategory()
       console.log('✅ Categories API response:', result)
       
-      const data = result.success ? result.data : []
-      console.log('📊 Categories data:', data?.length, 'categories')
+      const categories = result?.success ? result.data : (result?.data || result || [])
+      console.log('📊 Categories data:', categories?.length, 'categories')
       
       // Filter categories based on search text
       const filteredCategories = searchText 
-        ? data.filter(cat => 
+        ? categories.filter(cat => 
             cat.category_name?.toLowerCase().includes(searchText.toLowerCase()) ||
             cat.category_description?.toLowerCase().includes(searchText.toLowerCase())
           )
-        : data
+        : categories
       
       setCategories(filteredCategories)
       
       // Calculate statistics
-      const totalCats = data.length
-      const activeCats = data.filter(cat => cat.product_count > 0).length
-      const totalProds = data.reduce((sum, cat) => sum + (cat.product_count || 0), 0)
-      const totalValue = data.reduce((sum, cat) => sum + (parseFloat(cat.total_stock_value) || 0), 0)
+      const totalCats = categories.length
+      const activeCats = categories.filter(cat => cat.product_count > 0).length
+      const totalProds = categories.reduce((sum, cat) => sum + (cat.product_count || 0), 0)
+      const totalValue = categories.reduce((sum, cat) => sum + (parseFloat(cat.total_stock_value) || 0), 0)
       
       setTotalCategories(totalCats)
       setActiveCategories(activeCats)
@@ -122,29 +119,64 @@ const Categories = () => {
       dataIndex: 'category_name',
       key: 'category_name',
       sorter: (a, b) => (a.category_name || '').localeCompare(b.category_name || ''),
-      render: (name, record) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {record.level > 1 && (
-            <span style={{ 
-              color: '#999', 
-              fontSize: '14px', 
-              marginRight: '4px',
-              fontFamily: 'monospace' 
-            }}>
-              {'├─'.repeat(record.level - 1)}
-            </span>
-          )}
-          <Tag color={record.level === 1 ? 'blue' : 'cyan'} icon={<TagOutlined />}>
-            {name}
-          </Tag>
-          {record.level > 1 && (
-            <Tag color="orange" size="small">
-              Sub
+      render: (name, record) => {
+        const getTreeIndent = (level) => {
+          if (level === 1) return ''
+          let indent = ''
+          for (let i = 1; i < level; i++) {
+            indent += '│   '
+          }
+          return indent + '├─ '
+        }
+
+        const treeIndent = getTreeIndent(record.level)
+        
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0px' }}>
+            {record.level > 1 && (
+              <span style={{ 
+                color: '#bbb', 
+                fontSize: '12px', 
+                fontFamily: 'Consolas, Monaco, Courier New, monospace',
+                whiteSpace: 'pre',
+                lineHeight: '1',
+                marginRight: '4px'
+              }}>
+                {treeIndent}
+              </span>
+            )}
+            <Tag 
+              color={record.level === 1 ? 'blue' : record.level === 2 ? 'cyan' : 'geekblue'} 
+              icon={<TagOutlined />}
+              size={record.level > 1 ? 'small' : 'default'}
+              style={{ 
+                borderRadius: '4px',
+                fontWeight: record.level === 1 ? 'bold' : 'normal',
+                fontSize: record.level > 2 ? '11px' : '12px',
+                margin: 0
+              }}
+            >
+              {name}
             </Tag>
-          )}
-        </div>
-      ),
-      width: 250,
+            {record.level > 1 && (
+              <Tag 
+                color={record.level === 2 ? 'orange' : 'purple'} 
+                size="small"
+                style={{ 
+                  fontSize: '9px',
+                  lineHeight: '14px',
+                  padding: '0 4px',
+                  marginLeft: '4px'
+                }}
+              >
+                L{record.level}
+              </Tag>
+            )}
+          </div>
+        )
+      },
+      minWidth: 150,
+      ellipsis: true,
     },
     {
       title: t('categories.description') || 'Description',
@@ -152,14 +184,16 @@ const Categories = () => {
       key: 'category_description',
       render: (description, record) => (
         <div style={{ 
-          paddingLeft: record.level > 1 ? `${(record.level - 1) * 16}px` : '0px',
-          color: record.level > 1 ? '#666' : '#333'
+          paddingLeft: record.level > 1 ? `${(record.level - 1) * 12}px` : '0px',
+          color: record.level === 1 ? '#333' : record.level === 2 ? '#666' : '#999',
+          fontStyle: record.level > 2 ? 'italic' : 'normal',
+          fontSize: record.level > 2 ? '11px' : '13px'
         }}>
-          {description || '-'}
+          {description || (record.level > 1 ? '—' : '—')}
         </div>
       ),
       ellipsis: true,
-      width: 200,
+      minWidth: 120,
     },
     {
       title: t('categories.totalProducts') || 'Total Products',
@@ -167,11 +201,12 @@ const Categories = () => {
       key: 'product_count',
       sorter: (a, b) => (a.product_count || 0) - (b.product_count || 0),
       render: (count) => (
-        <Tag color={count > 0 ? 'green' : 'gray'} icon={<ShopOutlined />}>
+        <Tag color={count > 0 ? 'green' : 'gray'} icon={<ShopOutlined />} size="small">
           {count || 0}
         </Tag>
       ),
       align: 'center',
+      minWidth: 80,
       responsive: ['md'],
     },
     {
@@ -180,11 +215,12 @@ const Categories = () => {
       key: 'total_stock_quantity',
       sorter: (a, b) => (parseFloat(a.total_stock_quantity) || 0) - (parseFloat(b.total_stock_quantity) || 0),
       render: (quantity) => (
-        <Tag color={quantity > 0 ? 'blue' : 'default'} icon={<BarChartOutlined />}>
+        <Tag color={quantity > 0 ? 'blue' : 'default'} icon={<BarChartOutlined />} size="small">
           {quantity || 0}
         </Tag>
       ),
       align: 'center',
+      minWidth: 90,
       responsive: ['lg'],
     },
     {
@@ -196,25 +232,34 @@ const Categories = () => {
         <Tag 
           color={parseFloat(value) > 0 ? 'gold' : 'default'} 
           icon={<DollarOutlined />}
+          size="small"
         >
-          {parseFloat(value || 0).toFixed(2)} DA
+          {parseFloat(value || 0).toFixed(2)}
         </Tag>
       ),
       align: 'right',
+      minWidth: 100,
       responsive: ['lg'],
     },
     {
       title: t('common.actions') || 'Actions',
       key: 'actions',
       render: (_, record) => (
-        <Space size="small">
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'flex-start', 
+          alignItems: 'center',
+          gap: '4px',
+          paddingLeft: record.level > 1 ? `${(record.level - 1) * 20}px` : '0px',
+          minHeight: '32px'
+        }}>
           <Button
             type="primary"
             size="small"
             icon={<EditOutlined />}
             onClick={() => handleEditCategory(record)}
-          >
-          </Button>
+            style={{ minWidth: '28px' }}
+          />
           <Popconfirm
             title={t('categories.deleteCategoryConfirm') || 'Are you sure you want to delete this category?'}
             description={t('categories.deleteCategoryWarning') || 'This action cannot be undone.'}
@@ -233,13 +278,14 @@ const Categories = () => {
                 t('categories.categoryHasProducts', { count: record.product_count }) : 
                 t('categories.deleteCategory')
               }
-            >
-            </Button>
+              style={{ minWidth: '28px' }}
+            />
           </Popconfirm>
-        </Space>
+        </div>
       ),
-      width: 200,
-      align: 'center',
+      width: 140,
+      align: 'left',
+      fixed: 'right',
     },
   ]
 
@@ -335,13 +381,64 @@ const Categories = () => {
     })
   }
 
+  // Multi-select handlers
+  const onSelectChange = (newSelectedRowKeys) => {
+    setSelectedRowKeys(newSelectedRowKeys)
+    setBulkActionVisible(newSelectedRowKeys.length > 0)
+  }
+
+  const handleBulkDelete = async () => {
+    try {
+      setModalLoading(true)
+      
+      // Check if any selected categories have products
+      const categoriesWithProducts = selectedRowKeys.filter(id => {
+        const category = categories.find(cat => cat.id === id)
+        return category && category.product_count > 0
+      })
+      
+      if (categoriesWithProducts.length > 0) {
+        message.error(`${categoriesWithProducts.length} categories cannot be deleted because they contain products`)
+        return
+      }
+      
+      // Delete categories one by one
+      for (const categoryId of selectedRowKeys) {
+        await stockService.deleteCategory(categoryId)
+      }
+      
+      message.success(`${selectedRowKeys.length} categories deleted successfully!`)
+      setSelectedRowKeys([])
+      setBulkActionVisible(false)
+      fetchCategories()
+    } catch (error) {
+      console.error('Bulk delete error:', error)
+      message.error(error.error || 'Error deleting categories')
+    } finally {
+      setModalLoading(false)
+    }
+  }
+
+  const clearSelection = () => {
+    setSelectedRowKeys([])
+    setBulkActionVisible(false)
+  }
+
+  const rowSelection = {
+    selectedRowKeys,
+    onChange: onSelectChange,
+    getCheckboxProps: (record) => ({
+      disabled: record.product_count > 0, // Disable selection for categories with products
+    }),
+  }
+
   return (
     <div className="categories-page">
       <Card>
 
         {/* Search and Actions */}
         <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
-          <Col xs={24} sm={16} md={12} lg={8}>
+          <Col xs={24} sm={14} md={12} lg={10} xl={8}>
             <Search
               placeholder={t('categories.searchPlaceholder') || 'Search categories...'}
               allowClear
@@ -352,23 +449,72 @@ const Categories = () => {
               enterButton={<SearchOutlined />}
             />
           </Col>
-          <Row xs={24} sm={8} md={6} lg={4} style={{ textAlign: 'right', marginTop: { xs: 8, sm: 0 } }}>
+          <Col xs={24} sm={10} md={8} lg={6} xl={4} style={{ 
+            textAlign: 'right', 
+            marginTop: { xs: 8, sm: 0 },
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '8px'
+          }}>
             <Button
               icon={<ReloadOutlined />}
               onClick={handleRefresh}
               loading={loading}
-              style={{marginRight:'5px'}}
+              size="small"
+            />
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleAddCategory}
+              size="small"
+              style={{ 
+                minWidth: 'auto',
+                whiteSpace: 'nowrap'
+              }}
             >
-            </Button>
-             <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={handleAddCategory}
-              >
+              <span className="add-button-text">
                 {t('categories.addCategory') || 'Add Category'}
-              </Button>
-          </Row>
+              </span>
+            </Button>
+          </Col>
         </Row>
+
+        {/* Bulk Actions Bar */}
+        {bulkActionVisible && (
+          <Row style={{ marginBottom: 16, padding: '12px', backgroundColor: '#f0f2f5', borderRadius: '8px' }}>
+            <Col flex="auto">
+              <Space>
+                <Tag color="blue">{selectedRowKeys.length} selected</Tag>
+                <span style={{ color: '#666' }}>
+                  {t('categories.bulkActionsAvailable') || 'Bulk actions available'}
+                </span>
+              </Space>
+            </Col>
+            <Col>
+              <Space>
+                <Popconfirm
+                  title={t('categories.bulkDeleteConfirm') || `Delete ${selectedRowKeys.length} categories?`}
+                  description={t('categories.bulkDeleteWarning') || 'This action cannot be undone.'}
+                  onConfirm={handleBulkDelete}
+                  okText={t('common.yes') || 'Yes'}
+                  cancelText={t('common.no') || 'No'}
+                  okButtonProps={{ loading: modalLoading }}
+                >
+                  <Button 
+                    danger 
+                    icon={<DeleteOutlined />}
+                    disabled={modalLoading}
+                  >
+                    {t('categories.bulkDelete') || 'Delete Selected'}
+                  </Button>
+                </Popconfirm>
+                <Button onClick={clearSelection}>
+                  {t('common.clear') || 'Clear'}
+                </Button>
+              </Space>
+            </Col>
+          </Row>
+        )}
 
         {/* Categories Table */}
         <Spin spinning={loading}>
@@ -377,6 +523,7 @@ const Categories = () => {
             dataSource={categories}
             rowKey="id"
             loading={loading}
+            rowSelection={rowSelection}
             pagination={{
               total: categories.length,
               pageSize: 15,
@@ -385,12 +532,15 @@ const Categories = () => {
               showTotal: (total, range) =>
                 `${range[0]}-${range[1]} ${t('common.of') || 'of'} ${total} ${t('categories.items') || 'categories'}`,
             }}
-            scroll={{ x: 800, y: 600 }}
+            scroll={{ x: 'max-content' }}
             size="small"
             rowClassName={(record) => {
-              if (record.product_count === 0) return 'empty-category-row'
-              if (record.product_count > 10) return 'high-product-category-row'
-              return ''
+              let className = ''
+              if (record.product_count === 0) className += 'empty-category-row '
+              if (record.product_count > 10) className += 'high-product-category-row '
+              if (record.level === 1) className += 'parent-category-row '
+              if (record.level > 1) className += 'sub-category-row '
+              return className.trim()
             }}
           />
         </Spin>

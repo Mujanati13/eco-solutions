@@ -60,6 +60,7 @@
     "cityRequired": "City is required",
     "totalAmount": "Total Amount",
     "totalAmountRequired": "Total amount is required",
+    "wilayaCode": "Wilaya Code",
     "finalTotal": "Final Total (Amount + Delivery)",
     "productName": "Product Name",
     "productNameRequired": "Product name is required",
@@ -440,7 +441,11 @@
     "sortOrderPlaceholder": "Enter sort order (0-999)",
     "categoryHasProducts": "This category contains {{count}} products",
     "emptyCategory": "Empty Category",
-    "highProductCategory": "High Product Count"
+    "highProductCategory": "High Product Count",
+    "bulkActionsAvailable": "Bulk actions available",
+    "bulkDelete": "Delete Selected",
+    "bulkDeleteConfirm": "Delete {{count}} categories?",
+    "bulkDeleteWarning": "This action cannot be undone."
   },
   "navigation": {
     "dashboard": "Dashboard",
@@ -547,6 +552,8 @@
     "quickVariantsCreated": "Quick variants created successfully",
     "productCreatedVariantsFailed": "Product created but some variants failed",
     "variantsWillBeCreated": "variants will be created",
+    "stockUpdateFailed": "Variant updated but stock update failed",
+    "initialStockFailed": "Variant created but initial stock setting failed",
     "noLocationsAvailable": "No locations available",
     "variantName": "Variant Name",
     "variantNamePlaceholder": "Enter variant name",

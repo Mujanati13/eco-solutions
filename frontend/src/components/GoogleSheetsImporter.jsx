@@ -248,43 +248,6 @@ const GoogleSheetsImporter = ({ onImportSuccess }) => {
         )}
       </Card>
 
-      {/* French Excel Format Information */}
-      <Card 
-        title={
-          <Space>
-            <FileExcelOutlined />
-            <span>Format de fichier Excel français supporté</span>
-          </Space>
-        }
-        style={{ marginTop: 16 }}
-        size="small"
-      >
-        <Alert
-          message="Format de données attendu"
-          description={
-            <div>
-              <Text strong>Colonnes requises (A-L):</Text>
-              <ul style={{ marginTop: 8, marginBottom: 0 }}>
-                <li><Text code>Q</Text> - Référence commande</li>
-                <li><Text code>DATE</Text> - Date de commande</li>
-                <li><Text code>FULL_NAME</Text> - Nom client</li>
-                <li><Text code>PHONE</Text> - Téléphone</li>
-                <li><Text code>WILAYA</Text> - Code wilaya</li>
-                <li><Text code>COMMUNE</Text> - Commune</li>
-                <li><Text code>PRODUCT</Text> - Nom du produit</li>
-                <li><Text code>prix de produit</Text> - Prix produit</li>
-                <li><Text code>situation</Text> - Statut (SD=livré, etc.)</li>
-                <li><Text code>prix de livraison</Text> - Prix livraison</li>
-                <li><Text code>PRIX total</Text> - Prix total</li>
-                <li><Text code>note</Text> - Notes</li>
-              </ul>
-            </div>
-          }
-          type="info"
-          showIcon
-        />
-      </Card>
-
       {selectedSheet && (
         <Card 
           title={`Import from: ${selectedSheet.name}`}

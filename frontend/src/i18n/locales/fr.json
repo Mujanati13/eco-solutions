@@ -208,7 +208,11 @@
     "sortOrderPlaceholder": "Entrez l'ordre de tri (0-999)",
     "categoryHasProducts": "Cette catégorie contient {{count}} produits",
     "emptyCategory": "Catégorie Vide",
-    "highProductCategory": "Nombre Élevé de Produits"
+    "highProductCategory": "Nombre Élevé de Produits",
+    "bulkActionsAvailable": "Actions en lot disponibles",
+    "bulkDelete": "Supprimer la Sélection",
+    "bulkDeleteConfirm": "Supprimer {{count}} catégories?",
+    "bulkDeleteWarning": "Cette action ne peut pas être annulée."
   },
   "navigation": {
     "dashboard": "Tableau de Bord",
@@ -243,6 +247,8 @@
     "quickVariantsCreated": "Variantes créées avec succès",
     "productCreatedVariantsFailed": "Produit créé mais certaines variantes ont échoué",
     "variantsWillBeCreated": "variantes seront créées",
+    "stockUpdateFailed": "Variante mise à jour mais la mise à jour du stock a échoué",
+    "initialStockFailed": "Variante créée mais la définition du stock initial a échoué",
     "noLocationsAvailable": "Aucun emplacement disponible",
     "variantName": "Nom de la variante",
     "variantNamePlaceholder": "Entrez le nom de la variante",
@@ -411,6 +417,7 @@
     "customerAddress": "Adresse du Client",
     "customerCity": "Ville du Client",
     "totalAmount": "Montant Produit (DA)",
+    "wilayaCode": "Code Wilaya",
     "status": "Statut",
     "assignedTo": "Assigné à",
     "createdAt": "Créé le",

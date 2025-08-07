@@ -15,15 +15,116 @@
   margin-bottom: 16px;
 }
 
+/* Table Improvements */
+.categories-page .ant-table {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.categories-page .ant-table-container {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.categories-page .ant-table-content {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.categories-page .ant-table-body {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+/* Column Header Improvements */
+.categories-page .ant-table-thead > tr > th {
+  background: linear-gradient(90deg, #fafafa, #f5f5f5);
+  border-bottom: 2px solid #e8e8e8;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 8px 12px;
+  text-align: center;
+  white-space: nowrap;
+  min-width: fit-content;
+  width: auto;
+}
+
+/* Responsive Add Button */
+.add-button-text {
+  display: inline;
+}
+
+@media (max-width: 576px) {
+  .add-button-text {
+    display: none;
+  }
+}
+
+.categories-page .ant-table-tbody > tr > td {
+  padding: 8px 12px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 /* Table Row Styles */
 .empty-category-row {
-  background-color: #f5f5f5;
-  opacity: 0.7;
+  background-color: #f5f5f5 !important;
+  opacity: 0.8;
 }
 
 .high-product-category-row {
-  background-color: #f6ffed;
+  background-color: #e6f7ff !important;
   border-left: 3px solid #52c41a;
+}
+
+.parent-category-row {
+  background-color: #fafafa !important;
+  font-weight: 500;
+  border-top: 1px solid #e8e8e8;
+}
+
+.sub-category-row {
+  background-color: #fdfdfd !important;
+  position: relative;
+}
+
+.sub-category-row:before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(to bottom, #d9f7be, #b7eb8f);
+}
+
+.parent-category-row:hover,
+.sub-category-row:hover {
+  background-color: #f0f8ff !important;
+  transform: translateX(1px);
+  transition: all 0.2s ease;
+}
+
+/* Tree Structure Styling */
+.sub-category-row td:first-child {
+  background: linear-gradient(90deg, #f6ffed 0%, transparent 15%);
+}
+
+/* Adaptive Width Support */
+.categories-page .ant-table-thead > tr > th.ant-table-column-has-sorters {
+  min-width: fit-content;
+}
+
+.categories-page .ant-table-tbody > tr > td {
+  min-width: fit-content;
+}
+
+/* Tree Structure Font */
+.tree-indent {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  color: #bbb;
+  font-size: 12px;
+  line-height: 1;
 }
 
 /* Statistics Cards */
@@ -45,8 +146,62 @@
 /* Tags Styling */
 .categories-page .ant-tag {
   margin: 2px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-weight: 500;
+  font-size: 11px;
+}
+
+/* Bulk Actions Bar */
+.bulk-actions-bar {
+  background: linear-gradient(90deg, #e6f7ff 0%, #f0f8ff 100%);
+  border: 1px solid #91d5ff;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+/* Selection Improvements */
+.ant-table-selection-column .ant-checkbox-disabled .ant-checkbox-inner {
+  background-color: #f5f5f5 !important;
+  border-color: #d9d9d9 !important;
+}
+
+/* Responsive Improvements */
+@media (max-width: 768px) {
+  .categories-page .ant-table-thead > tr > th {
+    font-size: 10px;
+    padding: 6px 8px;
+  }
+  
+  .categories-page .ant-table-tbody > tr > td {
+    padding: 6px 8px;
+  }
+  
+  .tree-indent {
+    font-size: 10px;
+  }
+
+  /* Hide text in Add button on small screens */
+  .categories-page .ant-btn span:not(.anticon) {
+    display: none;
+  }
+}
+
+@media (max-width: 576px) {
+  /* Extra small screens - only show icons */
+  .categories-page .ant-btn-primary span:not(.anticon) {
+    display: none;
+  }
+}
+
+/* Actions Column Alignment */
+.categories-page .ant-table-tbody .ant-table-cell:last-child {
+  text-align: center !important;
+}
+
+.categories-page .ant-table-tbody .ant-table-cell:last-child > div {
+  justify-content: center;
+  align-items: center;
 }
 
 /* Responsive Design */

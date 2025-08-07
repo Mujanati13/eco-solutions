@@ -63,7 +63,6 @@ const GoogleSheets = () => {
     checkConnection();
     loadSheetInfo();
   }, []);
-
   const checkConnection = async () => {
     try {
       setLoading(true);
@@ -73,6 +72,7 @@ const GoogleSheets = () => {
     } catch (error) {
       setConnectionStatus('disconnected');
       console.error('Connection test failed:', error);
+      // message.error(t('integrations.googleSheets.connectionFailed'));
     } finally {
       setLoading(false);
     }
@@ -90,7 +90,7 @@ const GoogleSheets = () => {
   const handleImport = async (values) => {
     try {
       setLoading(true);
-      const sheetRange = values?.sheetRange || 'Orders!A2:L';
+      const sheetRange = values?.sheetRange || 'Orders!A2:M'; // Extended to include delivery type
       const result = await integrationsService.importFromGoogleSheets(sheetRange);
       
       setImportResult(result);
@@ -130,7 +130,7 @@ const GoogleSheets = () => {
       setLoading(true);
       setImportProgress(0);
       
-      const sheetRange = values?.sheetRange || 'Orders!A2:L';
+      const sheetRange = values?.sheetRange || 'Orders!A2:M'; // Extended to include delivery type
       
       // Update progress periodically
       const progressInterval = setInterval(() => {
@@ -170,8 +170,8 @@ const GoogleSheets = () => {
       
       setLastSync(new Date().toISOString());
     } catch (error) {
-      message.error(t('integrations.googleSheets.importError'));
       console.error('Import error:', error);
+      message.error(t('integrations.googleSheets.importError'));
     } finally {
       setLoading(false);
       setImportProgress(0);
@@ -230,10 +230,10 @@ const GoogleSheets = () => {
           <Form.Item
             label={t('integrations.googleSheets.sheetRange')}
             name="sheetRange"
-            initialValue="Orders!A2:L"
+            initialValue="Orders!A2:M"
             tooltip={t('integrations.googleSheets.sheetRangeTooltip')}
           >
-            <Input placeholder="Orders!A2:L" />
+            <Input placeholder="Orders!A2:M" />
           </Form.Item>
 
           <Form.Item label={t('integrations.googleSheets.options')}>

@@ -554,6 +554,13 @@ const Orders = () => {
       },
     },
     {
+      title: t("orders.wilayaCode"),
+      dataIndex: "wilaya_code",
+      key: "wilaya_code",
+      width: 100,
+      render: (wilayaCode) => wilayaCode || "-",
+    },
+    {
       title: t("orders.assignedTo"),
       dataIndex: "assigned_to",
       key: "assigned_to",
