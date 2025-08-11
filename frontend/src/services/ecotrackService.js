@@ -1,11 +1,46 @@
 const API_BASE_URL = 'https://app.noest-dz.com';
 import api from './api'; // Import your local API service
+import { configService } from './configService';
 
 class EcotrackService {
   constructor() {
     this.baseURL = API_BASE_URL;
-    this.apiToken = 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG';
-    this.userGuid = '2QG0JDFP'; // Add user GUID
+    this.apiToken = null;
+    this.userGuid = null;
+    this.configLoaded = false;
+  }
+
+  /**
+   * Load configuration from backend or use defaults
+   */
+  async loadConfig() {
+    if (this.configLoaded) return;
+    
+    try {
+      const credentials = await configService.getEcotrackCredentials();
+      this.apiToken = credentials.apiToken;
+      this.userGuid = credentials.userGuid;
+      this.configLoaded = true;
+    } catch (error) {
+      console.warn('Failed to load Ecotrack config, using defaults:', error);
+      // Fallback to hardcoded values
+      this.apiToken = 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG';
+      this.userGuid = '2QG0JDFP';
+      this.configLoaded = true;
+    }
+  }
+
+  /**
+   * Get current API credentials (loading if necessary)
+   */
+  async getCredentials() {
+    if (!this.configLoaded) {
+      await this.loadConfig();
+    }
+    return {
+      apiToken: this.apiToken,
+      userGuid: this.userGuid
+    };
   }
 
   // Helper method to make API calls with authentication
@@ -33,12 +68,15 @@ class EcotrackService {
   // 1. Create a single order
   async createOrder(orderData) {
     try {
+      // Load credentials if not already loaded
+      const credentials = await this.getCredentials();
+      
       // Step 1: Create order in Ecotrack
       const ecotrackResult = await this.makeRequest('/api/orders', {
         method: 'POST',
         body: JSON.stringify({
-          api_token: this.apiToken,
-          user_guid: this.userGuid,
+          api_token: credentials.apiToken,
+          user_guid: credentials.userGuid,
           type_id: 1, // Standard delivery
           ref_client: orderData.order_number || `ECO-${Date.now()}`,
           product_codes: orderData.product_details ? JSON.stringify(orderData.product_details) : orderData.product_name || 'Product',
@@ -139,11 +177,13 @@ class EcotrackService {
 
   // 3. Track a parcel
   async trackParcel(trackingNumber) {
+    const credentials = await this.getCredentials();
+    
     return this.makeRequest(`/api/public/get/trackings/info`, {
       method: 'POST',
       body: JSON.stringify({
-        api_token: this.apiToken,
-        user_guid: this.userGuid,
+        api_token: credentials.apiToken,
+        user_guid: credentials.userGuid,
         trackings: [trackingNumber]
       })
     });

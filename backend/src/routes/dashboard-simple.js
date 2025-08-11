@@ -12,7 +12,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
 
     if (isAdmin) {
       // Admin dashboard stats
-      const [totalOrders] = await pool.query('SELECT COUNT(*) as count FROM orders');
+      const [outForDeliveryOrders] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE status = "out_for_delivery"');
       const [pendingOrders] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE status = "pending"');
       const [completedOrders] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE status = "delivered"');
       const [cancelledOrders] = await pool.query('SELECT COUNT(*) as count FROM orders WHERE status = "cancelled"');
@@ -20,7 +20,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       const [activeUsers] = await pool.query('SELECT COUNT(*) as count FROM users WHERE is_active = true');
 
       res.json({
-        totalOrders: totalOrders[0].count,
+        outForDeliveryOrders: outForDeliveryOrders[0].count,
         pendingOrders: pendingOrders[0].count,
         completedOrders: completedOrders[0].count,
         cancelledOrders: cancelledOrders[0].count,

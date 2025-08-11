@@ -114,12 +114,12 @@ function App() {
                 <GoogleSheets />
               </PermissionRoute>
             } />
-            {/* Ecotrack Integration - DISABLED */}
-            {/* <Route path="integrations/ecotrack" element={
+            {/* Ecotrack Integration */}
+            <Route path="integrations/ecotrack" element={
               <PermissionRoute permission="canViewIntegrations">
                 <EcotrackIntegration />
               </PermissionRoute>
-            } /> */}
+            } />
             
             {/* Delivery Pricing Management */}
             <Route path="delivery-pricing" element={

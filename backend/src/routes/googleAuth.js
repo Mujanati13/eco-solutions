@@ -587,4 +587,69 @@ router.get('/debug', authenticateToken, async (req, res) => {
   }
 });
 
+// Update order status in Google Sheets
+router.post('/update-order-status', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { spreadsheetId, orderNumber, newStatus, sheetName = 'Sheet1' } = req.body;
+
+    if (!spreadsheetId || !orderNumber || !newStatus) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: spreadsheetId, orderNumber, newStatus'
+      });
+    }
+
+    const googleSheetsService = require('../services/googleSheets');
+    const result = await googleSheetsService.updateOrderStatusInSheet(
+      userId,
+      spreadsheetId,
+      orderNumber,
+      newStatus,
+      sheetName
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating order status in Google Sheets:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update order status in Google Sheets',
+      details: error.message
+    });
+  }
+});
+
+// Batch update order statuses in Google Sheets
+router.post('/batch-update-order-status', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { spreadsheetId, orderUpdates, sheetName = 'Sheet1' } = req.body;
+
+    if (!spreadsheetId || !orderUpdates || !Array.isArray(orderUpdates)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: spreadsheetId, orderUpdates (array)'
+      });
+    }
+
+    const googleSheetsService = require('../services/googleSheets');
+    const result = await googleSheetsService.batchUpdateOrderStatusInSheet(
+      userId,
+      spreadsheetId,
+      orderUpdates,
+      sheetName
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error batch updating order statuses in Google Sheets:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to batch update order statuses in Google Sheets',
+      details: error.message
+    });
+  }
+});
+
 module.exports = router;

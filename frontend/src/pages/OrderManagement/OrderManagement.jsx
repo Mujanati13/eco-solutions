@@ -25,6 +25,7 @@ import {
   Timeline,
   Descriptions,
   Switch,
+  Statistic,
 } from "antd";
 import { useTranslation } from "react-i18next";
 import {
@@ -45,11 +46,15 @@ import {
   TruckOutlined,
   LinkOutlined,
   SettingOutlined,
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
 } from "@ant-design/icons";
 import { orderService } from "../../services/orderService";
 import { userService } from "../../services/userService";
 import orderProductService from "../../services/orderProductService";
 import stockService from "../../services/stockService";
+import variantService from "../../services/variantService";
+import googleAuthService from "../../services/googleAuthService";
 import { useAuth } from "../../contexts/AuthContext";
 import "./OrderManagement.css";
 
@@ -106,12 +111,27 @@ const OrderManagement = () => {
   
   // Final total calculation state
   const [finalTotal, setFinalTotal] = useState(0);
+  
+  // Multi-selection and bulk operations state
+  const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [selectedOrders, setSelectedOrders] = useState([]);
+  const [bulkSendToDeliveryLoading, setBulkSendToDeliveryLoading] = useState(false);
+  const [bulkDeliveryModalVisible, setBulkDeliveryModalVisible] = useState(false);
 
   // Product and stock tracking state
   const [products, setProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [productStock, setProductStock] = useState(null);
   const [loadingProducts, setLoadingProducts] = useState(false);
+
+  // Google Sheets synchronization state
+  const [googleSheetsEnabled, setGoogleSheetsEnabled] = useState(false);
+  const [googleSheetsConfig, setGoogleSheetsConfig] = useState({
+    spreadsheetId: '',
+    sheetName: 'Sheet1'
+  });
+  const [googleAuthStatus, setGoogleAuthStatus] = useState(null);
+  const [googleSheetsModalVisible, setGoogleSheetsModalVisible] = useState(false);
 
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -123,13 +143,174 @@ const OrderManagement = () => {
   const canImportOrders = isAdmin;
   const canDistributeOrders = isAdmin;
 
+  // Calculate statistics from orders
+  const calculateStatistics = () => {
+    const stats = {
+      total: filteredOrders.length,
+      pending: 0,
+      confirmed: 0,
+      processing: 0,
+      out_for_delivery: 0,
+      delivered: 0,
+      cancelled: 0,
+      totalAmount: 0,
+      averageAmount: 0,
+    };
+
+    filteredOrders.forEach(order => {
+      stats.totalAmount += parseFloat(order.total_amount || 0);
+      
+      switch(order.status) {
+        case 'pending':
+          stats.pending++;
+          break;
+        case 'confirmed':
+          stats.confirmed++;
+          break;
+        case 'processing':
+          stats.processing++;
+          break;
+        case 'out_for_delivery':
+          stats.out_for_delivery++;
+          break;
+        case 'delivered':
+          stats.delivered++;
+          break;
+        case 'cancelled':
+          stats.cancelled++;
+          break;
+        default:
+          break;
+      }
+    });
+
+    stats.averageAmount = stats.total > 0 ? stats.totalAmount / stats.total : 0;
+
+    return stats;
+  };
+
+  const orderStats = calculateStatistics();
+
   useEffect(() => {
     fetchOrders();
     fetchOrdersWithProducts();
     if (canAssignOrders) {
       fetchUsers();
     }
+    
+    // Debug function for checking tracking IDs
+    window.debugTrackingIds = () => {
+      console.log('🔍 Debug: All orders with EcoTrack tracking IDs:');
+      const ordersWithTracking = allOrders.filter(order => order.ecotrack_tracking_id);
+      
+      if (ordersWithTracking.length === 0) {
+        console.log('❌ No orders found with EcoTrack tracking IDs');
+        console.log('Available orders:', allOrders.length);
+        return;
+      }
+      
+      ordersWithTracking.forEach(order => {
+        console.log(`Order ${order.id} (${order.order_number}):`, {
+          tracking_id: order.ecotrack_tracking_id,
+          type: typeof order.ecotrack_tracking_id,
+          length: order.ecotrack_tracking_id?.toString().length,
+          trimmed: order.ecotrack_tracking_id?.toString().trim(),
+          status: order.status,
+          ecotrack_synced: order.ecotrack_synced
+        });
+      });
+      
+      console.log(`📊 Total orders with tracking: ${ordersWithTracking.length}`);
+    };
+    
+    // Debug function to test delete API with specific tracking ID
+    window.testEcotrackDelete = async (trackingId, orderId = null) => {
+      try {
+        console.log(`🧪 Testing EcoTrack delete API via backend:`, {
+          trackingId: trackingId,
+          orderId: orderId,
+          length: trackingId?.length
+        });
+        
+        const response = await fetch('/api/ecotrack/delete-order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify({
+            trackingId: trackingId,
+            orderId: orderId,
+            reason: 'Test deletion'
+          })
+        });
+        
+        const responseData = await response.json();
+        console.log(`📤 Backend Response:`, {
+          status: response.status,
+          statusText: response.statusText,
+          success: responseData.success,
+          message: responseData.message,
+          data: responseData.data
+        });
+        
+        if (response.ok) {
+          console.log('✅ Delete test successful');
+        } else {
+          console.log('❌ Delete test failed');
+        }
+        
+        return { success: response.ok, status: response.status, body: responseText };
+      } catch (error) {
+        console.error('❌ Delete test error:', error);
+        return { success: false, error: error.message };
+      }
+    };
+    
+    console.log('💡 Debug functions available:');
+    console.log('- window.debugTrackingIds() - Check all tracking IDs');
+    console.log('- window.testEcotrackDelete(trackingId, orderId) - Test delete API (orderId optional)');
+    console.log('- window.debugTrackingStorage() - Analyze tracking ID storage');
+
+    // Enhanced debug function for tracking ID storage analysis
+    window.debugTrackingStorage = () => {
+      const ordersWithTracking = allOrders.filter(order => order.ecotrack_tracking_id);
+      console.log('🔍 DETAILED TRACKING ID STORAGE ANALYSIS:');
+      console.log(`Found ${ordersWithTracking.length} orders with tracking IDs`);
+      
+      ordersWithTracking.forEach(order => {
+        const trackingId = order.ecotrack_tracking_id;
+        const originalString = String(trackingId);
+        let cleanedId = originalString.trim();
+        
+        // Remove quotes if present
+        if (cleanedId.startsWith('"') && cleanedId.endsWith('"')) {
+          cleanedId = cleanedId.slice(1, -1);
+        }
+        
+        console.log(`📋 Order ${order.id} (${order.order_number}):`, {
+          original: trackingId,
+          originalType: typeof trackingId,
+          originalLength: originalString.length,
+          firstChar: originalString.charAt(0),
+          lastChar: originalString.charAt(originalString.length - 1),
+          hasQuotes: originalString.includes('"'),
+          trimmed: originalString.trim(),
+          cleaned: cleanedId,
+          cleanedLength: cleanedId.length,
+          isValidForDelete: cleanedId && cleanedId !== '""' && cleanedId !== 'null' && cleanedId.length > 0,
+          charCodes: originalString.split('').map(char => `${char}(${char.charCodeAt(0)})`).join(' ')
+        });
+      });
+      
+      return ordersWithTracking;
+    };
   }, []); // Remove filters from dependency array since we're doing frontend filtering
+
+  // Initialize Google Sheets configuration
+  useEffect(() => {
+    initializeGoogleSheets();
+  }, []);
 
   // Frontend filtering effect
   useEffect(() => {
@@ -293,44 +474,46 @@ const OrderManagement = () => {
 
   const handleWilayaChange = (wilayaId) => {
     setSelectedWilaya(wilayaId);
-    
-    // Clear current baladia selection and list
-    setBaladias([]);
-    form.setFieldsValue({ baladia_id: undefined });
 
     if (wilayaId) {
-      // Fetch baladias for the selected wilaya
-      fetchBaladias(wilayaId);
-      
-      // Delay calculation to allow form to update first
+      // Calculate delivery price based on wilaya selection only
       setTimeout(() => {
         calculateDeliveryPrice();
       }, 100);
+      
+      console.log('🚚 Wilaya selected for delivery pricing:', wilayaId);
     }
+  };
+
+  // Handle auto-selection of wilaya (from Excel import or other automated processes)
+  const handleAutoWilayaSelection = (wilayaId) => {
+    console.log('🔄 Auto-selecting wilaya:', wilayaId);
+    
+    // Set the wilaya in form
+    form.setFieldsValue({ wilaya_id: wilayaId });
+    
+    // Trigger the same logic as manual selection
+    handleWilayaChange(wilayaId);
+    
+    console.log('✅ Auto-selected wilaya will trigger Prix de Livraison calculation');
   };
 
   const calculateDeliveryPrice = async () => {
     try {
       const formValues = form.getFieldsValue();
-      const { wilaya_id, baladia_id, delivery_type, weight, volume } =
-        formValues;
+      const { wilaya_id, delivery_type, weight } = formValues;
 
       if (!wilaya_id) return;
 
       setLoadingDeliveryPrice(true);
 
+      // Auto-calculate Prix de Livraison based on selected wilaya only
       const pricingData = {
         wilaya_id,
         delivery_type: delivery_type || "home",
         weight: weight || 1,
-        volume: volume || 1,
-        pricing_level: baladia_id ? "baladia" : "wilaya", // Auto-determine based on baladia selection
+        pricing_level: "wilaya" // Always use wilaya-based pricing
       };
-
-      // Include baladia_id if available
-      if (baladia_id) {
-        pricingData.baladia_id = baladia_id;
-      }
 
       const response = await orderService.calculateDeliveryPrice(pricingData);
 
@@ -344,6 +527,11 @@ const OrderManagement = () => {
         setTimeout(() => {
           updateFinalTotal();
         }, 100);
+        
+        console.log('✅ Prix de Livraison auto-calculated from wilaya:', {
+          wilaya_id,
+          delivery_price: deliveryPrice
+        });
       }
     } catch (error) {
       console.error("Error calculating delivery price:", error);
@@ -372,13 +560,26 @@ const OrderManagement = () => {
     updateFinalTotal();
   }, [form]);
 
+  // Watch for wilaya_id changes and auto-calculate delivery price
+  useEffect(() => {
+    const wilaya_id = form.getFieldValue('wilaya_id');
+    if (wilaya_id) {
+      console.log('🔄 Wilaya detected in form, auto-calculating Prix de Livraison...');
+      setTimeout(() => {
+        calculateDeliveryPrice();
+      }, 200);
+    }
+  }, [form.getFieldValue('wilaya_id')]);
+
   const fetchProducts = async () => {
     try {
       setLoadingProducts(true);
+      console.log('🔄 Fetching products from API...');
       const response = await stockService.getProducts();
+      console.log('✅ Products fetched from API:', response.products?.length || 0, 'products');
       setProducts(response.products || []);
     } catch (error) {
-      console.error("Error fetching products:", error);
+      console.error("❌ Error fetching products:", error);
     } finally {
       setLoadingProducts(false);
     }
@@ -387,44 +588,73 @@ const OrderManagement = () => {
   // Function to automatically match product by name
   const autoSelectProductByName = async (productName) => {
     if (!productName) {
+      console.log('❌ No product name provided for auto-selection');
       return null;
     }
 
     // If products are still loading, wait a bit and retry
     if (loadingProducts || !products.length) {
-      console.log('Products not loaded yet, waiting...');
-      await new Promise(resolve => setTimeout(resolve, 500));
+      console.log('⏳ Products not loaded yet, waiting...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // If still no products after waiting, return null
+      // Try to reload products if they're still not available
+      if (!products.length && fetchProducts) {
+        console.log('🔄 Attempting to reload products from API...');
+        try {
+          await fetchProducts();
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (error) {
+          console.error('❌ Failed to reload products:', error);
+        }
+      }
+      
+      // If still no products after waiting and reloading, return null
       if (!products.length) {
-        console.log('No products available for matching');
+        console.log('❌ No products available for matching after API retry');
         return null;
       }
     }
 
     const cleanProductName = productName.trim();
-    console.log('Attempting to match product name:', cleanProductName);
+    console.log(`🔍 Attempting to auto-select product via API: "${cleanProductName}"`);
+    console.log(`📦 Available products from API: ${products.length}`);
 
-    // First try exact match (case insensitive)
-    let matchedProduct = products.find(p => 
+    let matchedProduct = null;
+
+    // Step 1: Try exact match (case insensitive)
+    matchedProduct = products.find(p => 
       p.name && p.name.toLowerCase().trim() === cleanProductName.toLowerCase()
     );
+    
+    if (matchedProduct) {
+      console.log('✅ Found exact match via API:', matchedProduct.name);
+    } else {
+      console.log('❌ No exact match found via API');
+    }
 
-    // If no exact match, try partial match (product name contains search term)
+    // Step 2: If no exact match, try partial match (product name contains search term)
     if (!matchedProduct) {
       matchedProduct = products.find(p => 
         p.name && p.name.toLowerCase().includes(cleanProductName.toLowerCase())
       );
+      
+      if (matchedProduct) {
+        console.log('✅ Found partial match via API (product contains search):', matchedProduct.name);
+      }
     }
 
-    // If still no match, try reverse partial match (search term contains product name)
+    // Step 3: If still no match, try reverse partial match (search term contains product name)
     if (!matchedProduct) {
       matchedProduct = products.find(p => 
         p.name && cleanProductName.toLowerCase().includes(p.name.toLowerCase())
       );
+      
+      if (matchedProduct) {
+        console.log('✅ Found reverse partial match via API (search contains product):', matchedProduct.name);
+      }
     }
 
-    // Try matching without special characters and extra spaces
+    // Step 4: Try matching without special characters and extra spaces
     if (!matchedProduct) {
       const normalizedSearchName = cleanProductName.toLowerCase().replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, ' ');
       matchedProduct = products.find(p => {
@@ -434,23 +664,237 @@ const OrderManagement = () => {
                normalizedProductName.includes(normalizedSearchName) ||
                normalizedSearchName.includes(normalizedProductName);
       });
+      
+      if (matchedProduct) {
+        console.log('✅ Found normalized match via API:', matchedProduct.name);
+      }
+    }
+
+    // Step 5: If still no match, try to search variants via API
+    if (!matchedProduct) {
+      console.log('🔍 No direct product match found, checking variants via API...');
+      try {
+        // Check if any product has variants that match
+        for (const product of products) {
+          if (product.id) {
+            try {
+              const variantResponse = await variantService.getVariantsByProduct(product.id);
+              const variants = variantResponse.variants || [];
+              
+              const matchingVariant = variants.find(v => 
+                v.variant_name && (
+                  v.variant_name.toLowerCase().includes(cleanProductName.toLowerCase()) ||
+                  cleanProductName.toLowerCase().includes(v.variant_name.toLowerCase())
+                )
+              );
+              
+              if (matchingVariant) {
+                console.log('✅ Found matching variant via API:', matchingVariant.variant_name, 'for product:', product.name);
+                matchedProduct = product;
+                break;
+              }
+            } catch (variantError) {
+              console.log('⚠️ Could not fetch variants for product:', product.name);
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('❌ Error checking variants via API:', error);
+      }
     }
 
     if (matchedProduct) {
-      console.log('Found matching product:', matchedProduct.name, 'SKU:', matchedProduct.sku, 'External Link:', matchedProduct.external_link || 'None');
-      // Automatically select the matched product
-      await handleProductSelection(matchedProduct.sku);
-      return matchedProduct;
+      console.log(`🎯 Auto-selecting product via API: "${matchedProduct.name}" (SKU: ${matchedProduct.sku})`);
+      
+      try {
+        // Automatically select the matched product
+        await handleProductSelection(matchedProduct.sku);
+        console.log('✅ Product auto-selection via API completed successfully');
+        return matchedProduct;
+      } catch (error) {
+        console.error('❌ Error during product auto-selection via API:', error);
+        return null;
+      }
     } else {
-      console.log('No matching product found for:', cleanProductName);
-      console.log('Available products:', products.map(p => p.name));
+      console.log('❌ Product not found in database:', cleanProductName);
+      console.log('💡 Product does not exist in our product database - skipping auto-selection');
+      console.log('🔍 Available products in database:');
+      products.slice(0, 10).forEach((p, index) => {
+        console.log(`  ${index + 1}. "${p.name}" (SKU: ${p.sku})`);
+      });
+      if (products.length > 10) {
+        console.log(`  ... and ${products.length - 10} more products in database`);
+      }
+      
+      // Show a user-friendly message that the product is not in the database
+      message.warning(`Product "${cleanProductName}" not found in database. Please select an existing product manually.`, 4);
     }
 
     return null;
   };
 
+  // Debug function to test auto-selection (can be called from browser console)
+  const testAutoSelection = async (productName) => {
+    console.log('🧪 Testing auto-selection via API for:', productName);
+    console.log('📡 Current products in state:', products.length);
+    console.log('🔄 Loading status:', loadingProducts);
+    
+    const result = await autoSelectProductByName(productName);
+    if (result) {
+      console.log('✅ Test successful via API:', result.name, 'SKU:', result.sku);
+    } else {
+      console.log('❌ Test failed: No match found via API');
+      console.log('💡 Suggestion: Try refreshing products via API first');
+    }
+    return result;
+  };
+
+  // Make test function available globally for debugging
+  React.useEffect(() => {
+    window.testAutoSelection = testAutoSelection;
+    window.refreshProducts = fetchProducts; // Also make refresh function available
+    return () => {
+      delete window.testAutoSelection;
+      delete window.refreshProducts;
+    };
+  }, [products]);
+
+  // Function to auto-select variant from Excel import
+  const autoSelectVariantFromExcel = async (productInfo) => {
+    if (!productInfo) return;
+
+    console.log('🔄 Auto-selecting variant from Excel import:', productInfo);
+
+    const currentProductInfo = form.getFieldValue('product_info') || {};
+    let variantInfo = {};
+    let matchedVariant = null;
+
+    // Extract variant information from Excel product data
+    // Support both English and French/Arabic field names
+    const variantMappings = {
+      // Size variants
+      size: productInfo.size || productInfo.taille || productInfo.variant,
+      // Color variants  
+      color: productInfo.color || productInfo.couleur,
+      // Model variants
+      model: productInfo.model || productInfo.modele || productInfo.modèle,
+      // Style variants
+      style: productInfo.style || productInfo.type,
+      // General variant field from Excel
+      variant: productInfo.variant || productInfo.variante || productInfo.product_variant
+    };
+
+    // Build variant info from available fields
+    Object.keys(variantMappings).forEach(key => {
+      if (variantMappings[key] && variantMappings[key].trim()) {
+        variantInfo[key] = variantMappings[key].trim();
+      }
+    });
+
+    // If we have a selected product, try to match variants via API
+    if (selectedProduct && Object.keys(variantInfo).length > 0) {
+      try {
+        console.log('🔍 Searching for matching variants in store for product:', selectedProduct.sku);
+        
+        // Get all variants for the selected product
+        const variantsResponse = await variantService.getVariantsByProduct(selectedProduct.id);
+        const availableVariants = variantsResponse.data || variantsResponse.variants || [];
+
+        if (availableVariants.length > 0) {
+          // Try to match Excel variant with existing store variants
+          matchedVariant = findBestVariantMatch(variantInfo, availableVariants);
+          
+          if (matchedVariant) {
+            console.log('✅ Found matching variant in store:', matchedVariant.variant_name);
+            
+            // Update form with matched variant info
+            variantInfo = {
+              ...variantInfo,
+              matched_variant_id: matchedVariant.id,
+              matched_variant_name: matchedVariant.variant_name,
+              matched_variant_sku: matchedVariant.sku,
+              variant_price: matchedVariant.selling_price || matchedVariant.cost_price
+            };
+          } else {
+            console.log('⚠️ No exact variant match found in store, using Excel data as-is');
+          }
+        } else {
+          console.log('ℹ️ No variants available for this product in store');
+        }
+      } catch (error) {
+        console.warn('Error fetching variants from API:', error);
+      }
+    }
+
+    // Update form with variant information
+    if (Object.keys(variantInfo).length > 0) {
+      const updatedProductInfo = {
+        ...currentProductInfo,
+        ...variantInfo
+      };
+
+      form.setFieldsValue({
+        product_info: updatedProductInfo
+      });
+
+      console.log('✅ Auto-selected variant info:', variantInfo);
+      return variantInfo;
+    } else {
+      console.log('⚠️ No variant information found in Excel data');
+      return null;
+    }
+  };
+
+  // Helper function to find best variant match
+  const findBestVariantMatch = (excelVariantInfo, storeVariants) => {
+    const excelVariantText = Object.values(excelVariantInfo)
+      .filter(val => val && typeof val === 'string')
+      .join(' ')
+      .toLowerCase()
+      .trim();
+
+    if (!excelVariantText) return null;
+
+    console.log('🔍 Matching Excel variant text:', excelVariantText);
+    console.log('📦 Available store variants:', storeVariants.map(v => v.variant_name));
+
+    // Try exact match first
+    let bestMatch = storeVariants.find(variant => 
+      variant.variant_name && 
+      variant.variant_name.toLowerCase().trim() === excelVariantText
+    );
+
+    // Try partial match if no exact match
+    if (!bestMatch) {
+      bestMatch = storeVariants.find(variant => 
+        variant.variant_name && 
+        (variant.variant_name.toLowerCase().includes(excelVariantText) ||
+         excelVariantText.includes(variant.variant_name.toLowerCase()))
+      );
+    }
+
+    // Try word-by-word matching
+    if (!bestMatch) {
+      const excelWords = excelVariantText.split(/\s+/);
+      bestMatch = storeVariants.find(variant => {
+        if (!variant.variant_name) return false;
+        const variantWords = variant.variant_name.toLowerCase().split(/\s+/);
+        return excelWords.some(excelWord => 
+          variantWords.some(variantWord => 
+            excelWord.includes(variantWord) || variantWord.includes(excelWord)
+          )
+        );
+      });
+    }
+
+    return bestMatch;
+  };
+
   const handleProductSelection = async (productSku) => {
+    console.log('🔄 handleProductSelection called with SKU:', productSku);
+    
     if (!productSku) {
+      console.log('⚠️ No SKU provided, clearing selection');
       setSelectedProduct(null);
       setProductStock(null);
       return;
@@ -459,12 +903,16 @@ const OrderManagement = () => {
     try {
       // Find product by SKU
       const product = products.find(p => p.sku === productSku);
+      console.log('🔍 Looking for product with SKU:', productSku);
+      console.log('📦 Total products available:', products.length);
+      
       if (product) {
+        console.log('✅ Found product:', product.name, 'Price:', product.selling_price);
         setSelectedProduct(product);
         setProductStock(product.current_stock);
         
         // Auto-fill product information
-        form.setFieldsValue({
+        const newFormValues = {
           product_info: {
             ...form.getFieldValue('product_info'),
             name: product.name,
@@ -473,7 +921,10 @@ const OrderManagement = () => {
             external_link: product.external_link || ''
           },
           total_amount: product.selling_price.toFixed(2) // Set total_amount to unit price (this is now the main price field)
-        });
+        };
+        
+        console.log('📝 Setting form values:', newFormValues);
+        form.setFieldsValue(newFormValues);
         
         // Force form to re-render to update dependencies
         setTimeout(() => {
@@ -488,15 +939,22 @@ const OrderManagement = () => {
         // Update calculations
         setTimeout(() => updateProductTotal(), 100);
         
+        console.log('✅ Product selection completed successfully');
+        
         // Show stock warning if low
         if (product.current_stock <= 5) {
           message.warning(
             `${t("stock.lowStockWarning")}: ${product.current_stock} ${t("stock.units")} ${t("stock.remaining")}`
           );
         }
+      } else {
+        console.log('❌ Product not found with SKU:', productSku);
+        console.log('🔍 Available product SKUs:', products.map(p => p.sku).slice(0, 10).join(', '));
+        setSelectedProduct(null);
+        setProductStock(null);
       }
     } catch (error) {
-      console.error("Error handling product selection:", error);
+      console.error("❌ Error handling product selection:", error);
     }
   };
 
@@ -531,6 +989,210 @@ const OrderManagement = () => {
     
     // Update final total state
     setFinalTotal(calculatedFinalTotal);
+  };
+
+  // Initialize Google Sheets configuration
+  const initializeGoogleSheets = async () => {
+    try {
+      // Check Google authentication status
+      const authStatus = await googleAuthService.getAuthStatus();
+      setGoogleAuthStatus(authStatus);
+      
+      if (authStatus.isAuthenticated) {
+        // Load Google Sheets configuration from localStorage or API
+        const savedConfig = localStorage.getItem('googleSheetsConfig');
+        if (savedConfig) {
+          const config = JSON.parse(savedConfig);
+          setGoogleSheetsConfig(config);
+          setGoogleSheetsEnabled(config.enabled || false);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to initialize Google Sheets:', error);
+      setGoogleAuthStatus({ isAuthenticated: false });
+    }
+  };
+
+  // Update order status in Google Sheets
+  const updateOrderStatusInGoogleSheets = async (orderNumber, newStatus) => {
+    console.log('🔍 Google Sheets Update Check:', {
+      orderNumber,
+      newStatus
+    });
+
+    try {
+      // Find the order to get its source spreadsheet information
+      const order = allOrders.find(o => o.order_number === orderNumber);
+      
+      if (!order) {
+        console.log('⚠️ Order not found for Google Sheets update');
+        return { success: false, message: 'Order not found' };
+      }
+
+      // Check if this order has source Google Sheets information
+      if (!order.source_spreadsheet_id) {
+        console.log('⚠️ Order has no source Google Sheets information - skipping update');
+        return { success: false, message: 'Order not from Google Sheets' };
+      }
+
+      console.log(`📊 Automatically updating order ${orderNumber} status to ${newStatus} in source Google Sheet...`);
+      console.log(`🎯 Target: Spreadsheet ${order.source_spreadsheet_id}, Sheet: ${order.source_sheet_name}`);
+      
+      const result = await googleAuthService.updateOrderStatusInSheet(
+        order.source_spreadsheet_id,
+        orderNumber,
+        newStatus,
+        order.source_sheet_name || 'Sheet1'
+      );
+
+      if (result.success) {
+        console.log(`✅ Successfully updated Google Sheets for order ${orderNumber}`);
+        message.success(`Order status updated in source Google Sheet: ${order.source_file_name}`);
+      } else {
+        console.warn(`⚠️ Failed to update Google Sheets: ${result.message}`);
+        message.warning(`Could not update Google Sheets: ${result.message}`);
+      }
+
+      return result;
+    } catch (error) {
+      console.error('Error updating Google Sheets:', error);
+      message.warning('Failed to update Google Sheets');
+      return { success: false, message: error.message };
+    }
+  };
+
+  // Manual sync all orders with Google Sheets
+  const handleManualSyncAllOrders = async () => {
+    try {
+      setLoading(true);
+      
+      console.log(`🔍 Manual sync: Checking ${allOrders.length} total orders for source tracking`);
+      
+      // Debug: Log orders structure to see what data we have
+      if (allOrders.length > 0) {
+        const sampleOrder = allOrders[0];
+        console.log('📋 Sample order structure:', {
+          id: sampleOrder.id,
+          order_number: sampleOrder.order_number,
+          status: sampleOrder.status,
+          status_type: typeof sampleOrder.status,
+          all_status_fields: Object.keys(sampleOrder).filter(key => key.toLowerCase().includes('status')),
+          has_source_spreadsheet_id: !!sampleOrder.source_spreadsheet_id,
+          has_source_sheet_name: !!sampleOrder.source_sheet_name,
+          has_source_file_name: !!sampleOrder.source_file_name,
+          source_info: {
+            spreadsheet_id: sampleOrder.source_spreadsheet_id,
+            sheet_name: sampleOrder.source_sheet_name,
+            file_name: sampleOrder.source_file_name
+          }
+        });
+      }
+      
+      // Get all orders that have source tracking information
+      const ordersWithSource = allOrders.filter(order => 
+        order.source_spreadsheet_id && 
+        order.source_sheet_name && 
+        order.order_number
+      );
+
+      // Enhanced debugging information
+      const ordersWithPartialSource = allOrders.filter(order => 
+        order.source_spreadsheet_id || 
+        order.source_sheet_name || 
+        order.source_file_name
+      );
+
+      console.log(`📊 Source tracking analysis:`, {
+        total_orders: allOrders.length,
+        orders_with_complete_source: ordersWithSource.length,
+        orders_with_partial_source: ordersWithPartialSource.length,
+        orders_without_source: allOrders.length - ordersWithPartialSource.length
+      });
+
+      if (ordersWithSource.length === 0) {
+        // Show more helpful message with details
+        if (ordersWithPartialSource.length > 0) {
+          message.warning(t("orders.partialSourceTracking", { 
+            partial: ordersWithPartialSource.length,
+            total: allOrders.length
+          }));
+        } else {
+          message.info(t("orders.noOrdersToSync"));
+        }
+        
+        // Show suggestion for testing
+        message.info(t("orders.syncSuggestion"), 6);
+        return;
+      }
+
+      console.log(`🔄 Manual sync: Found ${ordersWithSource.length} orders with complete source tracking`);
+      
+      let successCount = 0;
+      let errorCount = 0;
+      const errors = [];
+
+      // Process orders in batches to avoid overwhelming the API
+      const batchSize = 5;
+      for (let i = 0; i < ordersWithSource.length; i += batchSize) {
+        const batch = ordersWithSource.slice(i, i + batchSize);
+        
+        console.log(`📦 Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(ordersWithSource.length/batchSize)}: ${batch.length} orders`);
+        
+        // Process batch in parallel
+        const batchPromises = batch.map(async (order) => {
+          try {
+            console.log(`🔄 Syncing order: ${order.order_number} -> ${order.status} (type: ${typeof order.status})`);
+            console.log(`📝 Order status field debug:`, {
+              status: order.status,
+              order_status: order.order_status,
+              delivery_status: order.delivery_status,
+              payment_status: order.payment_status,
+              available_fields: Object.keys(order).filter(key => key.toLowerCase().includes('status'))
+            });
+            const result = await updateOrderStatusInGoogleSheets(order.order_number, order.status);
+            if (result.success) {
+              successCount++;
+              console.log(`✅ Success: ${order.order_number}`);
+            } else {
+              errorCount++;
+              errors.push(`${order.order_number}: ${result.message}`);
+              console.warn(`❌ Failed: ${order.order_number} - ${result.message}`);
+            }
+          } catch (error) {
+            errorCount++;
+            errors.push(`${order.order_number}: ${error.message}`);
+            console.error(`💥 Error: ${order.order_number} - ${error.message}`);
+          }
+        });
+
+        await Promise.all(batchPromises);
+        
+        // Add a small delay between batches to be respectful to the API
+        if (i + batchSize < ordersWithSource.length) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      // Show results
+      if (successCount > 0 && errorCount === 0) {
+        message.success(t("orders.manualSyncSuccess", { count: successCount }));
+      } else if (successCount > 0 && errorCount > 0) {
+        message.warning(t("orders.manualSyncPartial", { success: successCount, errors: errorCount }));
+      } else {
+        message.error(t("orders.manualSyncFailed", { errors: errorCount }));
+      }
+
+      // Log errors for debugging
+      if (errors.length > 0) {
+        console.warn('Manual sync errors:', errors);
+      }
+
+    } catch (error) {
+      console.error('Manual sync error:', error);
+      message.error(t("orders.manualSyncError"));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCreateOrder = async (values) => {
@@ -620,8 +1282,89 @@ const OrderManagement = () => {
   const handleStatusChange = async (orderId, newStatus) => {
     try {
       console.log(`🔄 Status change initiated: Order ${orderId} -> ${newStatus}`);
+      
+      // Special handling for cancelled orders with EcoTrack tracking
+      if (newStatus === 'cancelled') {
+        const order = allOrders.find(o => o.id === orderId);
+        
+        console.log(`🔍 Checking order for Ecotrack deletion before cancellation:`, {
+          orderId,
+          order: order ? 'Found' : 'Not found',
+          ecotrack_tracking_id: order?.ecotrack_tracking_id,
+          hasEcotrackId: !!order?.ecotrack_tracking_id
+        });
+        
+        // If order has EcoTrack tracking ID, try to delete from EcoTrack first
+        if (order && order.ecotrack_tracking_id) {
+          console.log(`🗑️ Order has EcoTrack tracking - attempting delete before status change`);
+          
+          try {
+            // Call backend EcoTrack delete API
+            const deleteResponse = await fetch('/api/ecotrack/delete-order', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+              },
+              body: JSON.stringify({
+                trackingId: order.ecotrack_tracking_id,
+                orderId: order.id,
+                reason: 'Order cancelled by user'
+              })
+            });
+
+            if (!deleteResponse.ok) {
+              const errorData = await deleteResponse.json();
+              console.error(`❌ EcoTrack deletion failed (${deleteResponse.status}):`, errorData);
+              
+              // For 422 errors, show specific message and don't change status
+              if (deleteResponse.status === 422) {
+                message.error(`Cannot cancel order: ${errorData.message || 'EcoTrack validation error'}`);
+                return; // Don't change status if EcoTrack deletion fails
+              } else {
+                message.error(`Cannot cancel order: EcoTrack API error (${deleteResponse.status}). Please try again later.`);
+                return; // Don't change status if EcoTrack deletion fails
+              }
+            } else {
+              const deleteResult = await deleteResponse.json();
+              console.log(`✅ Successfully deleted from EcoTrack and status updated automatically:`, deleteResult);
+              message.success('Order cancelled and removed from EcoTrack tracking system');
+              
+              // Backend has already updated the status, so we don't need to do it manually
+              // Just refresh the data and return early
+              fetchOrders();
+              return;
+            }
+          } catch (ecotrackError) {
+            console.error('Error during EcoTrack deletion:', ecotrackError);
+            message.error(`Cannot cancel order: EcoTrack deletion failed - ${ecotrackError.message}`);
+            return; // Don't change status if EcoTrack deletion fails
+          }
+        }
+      }
+      
+      // Now update the order status (either for non-cancelled orders, or for cancelled orders after successful EcoTrack deletion)
       const response = await orderService.updateOrder(orderId, { status: newStatus });
       console.log(`✅ Status change response:`, response);
+      
+      // Show success message
+      if (newStatus === 'cancelled') {
+        message.success(`${t("orders.statusUpdateSuccess")} - Order cancelled successfully`);
+      } else {
+        message.success(t("orders.statusUpdateSuccess"));
+      }
+      
+      // Get order details for Google Sheets update
+      const order = allOrders.find(o => o.id === orderId);
+      const orderNumber = order?.order_number;
+      
+      // Update status in Google Sheets (async, don't block the main flow)
+      if (orderNumber) {
+        updateOrderStatusInGoogleSheets(orderNumber, newStatus).catch(error => {
+          console.error('Google Sheets update failed:', error);
+          // Don't show error to user, just log it
+        });
+      }
       
       // Handle stock deduction for delivered orders
       if (newStatus === 'delivered') {
@@ -716,8 +1459,8 @@ const OrderManagement = () => {
         }
         
         // Show Ecotrack info
-        console.log(`🚚 Showing Ecotrack confirmation message for order ${orderId}`);
-        message.info('📦 Order confirmed! Ecotrack shipment will be created automatically.', 4);
+        // console.log(`🚚 Showing Ecotrack confirmation message for order ${orderId}`);
+        // message.info('📦 Order confirmed! Ecotrack shipment will be created automatically.', 4);
         
         // Refresh orders after a short delay to get updated tracking info
         console.log(`🔄 Scheduling order refresh in 2 seconds...`);
@@ -725,54 +1468,6 @@ const OrderManagement = () => {
           console.log(`🔄 Refreshing orders to get Ecotrack data...`);
           fetchOrders();
         }, 2000);
-      }
-      // Handle Ecotrack deletion for cancelled orders
-      else if (newStatus === 'cancelled') {
-        const order = allOrders.find(o => o.id === orderId);
-        
-        console.log(`🔍 Checking order for Ecotrack deletion:`, {
-          orderId,
-          order: order ? 'Found' : 'Not found',
-          ecotrack_tracking_id: order?.ecotrack_tracking_id,
-          tracking_id: order?.tracking_id // Just for debugging
-        });
-        
-        // Check if order has Ecotrack tracking ID
-        if (order && order.ecotrack_tracking_id) {
-          try {
-            console.log(`🗑️ Deleting order from Ecotrack: ${order.ecotrack_tracking_id}`);
-            
-            // Call Ecotrack deletion API
-            const deleteResponse = await fetch('https://app.noest-dz.com/api/public/delete/order', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                api_token: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
-                user_guid: '2QG0JDFP',
-                tracking: order.ecotrack_tracking_id
-              })
-            });
-
-            if (deleteResponse.ok) {
-              const deleteResult = await deleteResponse.json();
-              console.log(`✅ Successfully deleted from Ecotrack:`, deleteResult);
-              message.success(`${t("orders.statusUpdateSuccess")} - Order removed from Ecotrack tracking system`);
-            } else {
-              console.warn(`⚠️ Failed to delete from Ecotrack:`, await deleteResponse.text());
-              message.warning(`${t("orders.statusUpdateSuccess")} - Note: Could not remove from Ecotrack tracking system`);
-            }
-          } catch (ecotrackError) {
-            console.error('Error deleting from Ecotrack:', ecotrackError);
-            message.warning(`${t("orders.statusUpdateSuccess")} - Note: Could not remove from Ecotrack tracking system`);
-          }
-        } else {
-          console.log(`ℹ️ Order has no Ecotrack tracking ID, skipping deletion from Ecotrack`);
-          message.success(t("orders.statusUpdateSuccess"));
-        }
-        
-        fetchOrders();
       } else {
         // Show success message for other status changes
         message.success(t("orders.statusUpdateSuccess"));
@@ -831,9 +1526,267 @@ const OrderManagement = () => {
     handleDistributeOrders(values);
   };
 
+  // Multi-selection handlers
+  const handleRowSelectionChange = (selectedRowKeys, selectedRows) => {
+    console.log('🔲 Selected rows changed:', { selectedRowKeys, selectedRows });
+    setSelectedRowKeys(selectedRowKeys);
+    setSelectedOrders(selectedRows);
+  };
+
+  const handleSelectAll = () => {
+    const allRowKeys = filteredOrders.map(order => order.id);
+    setSelectedRowKeys(allRowKeys);
+    setSelectedOrders(filteredOrders);
+    message.info(t('orders.selectedAllOrders', { count: filteredOrders.length }));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedRowKeys([]);
+    setSelectedOrders([]);
+    // message.info(t('orders.selectionCleared'));
+  };
+
+  // Bulk send to delivery function
+  const handleBulkSendToDelivery = () => {
+    if (selectedOrders.length === 0) {
+      message.warning(t('orders.noOrdersSelected'));
+      return;
+    }
+
+    // Filter orders that can be sent to delivery (confirmed status)
+    const eligibleOrders = selectedOrders.filter(order => order.status === 'confirmed');
+    
+    if (eligibleOrders.length === 0) {
+      message.warning(t('orders.noEligibleOrdersForDelivery'));
+      return;
+    }
+
+    if (eligibleOrders.length !== selectedOrders.length) {
+      message.warning(t('orders.someOrdersNotEligible', { 
+        eligible: eligibleOrders.length, 
+        total: selectedOrders.length 
+      }));
+    }
+
+    setBulkDeliveryModalVisible(true);
+  };
+
+  const executeBulkSendToDelivery = async () => {
+    try {
+      setBulkSendToDeliveryLoading(true);
+
+      const eligibleOrders = selectedOrders.filter(order => order.status === 'confirmed');
+      let successCount = 0;
+      let errorCount = 0;
+      const errors = [];
+
+      for (const order of eligibleOrders) {
+        try {
+          console.log(`🚚 Processing order ${order.id} for delivery...`);
+          console.log(`📋 Order data available:`, {
+            id: order.id,
+            order_number: order.order_number,
+            customer_name: order.customer_name,
+            customer_phone: order.customer_phone,
+            customer_address: order.customer_address,
+            address: order.address,
+            customer_city: order.customer_city,
+            city: order.city,
+            baladia_name: order.baladia_name,
+            wilaya_id: order.wilaya_id,
+            total_amount: order.total_amount,
+            notes: order.notes,
+            remarks: order.remarks
+          });
+          
+          // Prepare order data for EcoTrack
+          const ecotrackData = {
+            reference: order.order_number || `ORDER-${order.id}`,
+            client: order.customer_name || 'Client',
+            phone: order.customer_phone?.replace(/\D/g, '').substring(0, 10) || '0000000000',
+            adresse: order.customer_address || order.address || 'Adresse non spécifiée',
+            wilaya_id: order.wilaya_id || 16, // Default to Algiers if not set
+            commune: validateCommuneForEcotrack(order.baladia_name || order.customer_city || ''),
+            montant: parseFloat(order.total_amount) || 0,
+            remarque: order.notes || order.remarks || '',
+            produit: order.product_details ? 
+              (typeof order.product_details === 'string' ? 
+                JSON.parse(order.product_details).name : 
+                order.product_details.name) || 'Produit' : 'Produit',
+            type_id: 1, // Standard delivery
+            poids: 1, // Default weight
+            stop_desk: 0, // Home delivery
+            stock: 0,
+            can_open: 0
+          };
+          
+          // Function to validate commune for EcoTrack
+          function validateCommuneForEcotrack(communeName) {
+            if (!communeName || typeof communeName !== 'string') {
+              return '';
+            }
+            
+            const cleaned = communeName.trim();
+            
+            // Skip if it's generic text
+            if (cleaned.includes('non spécifiée') || 
+                cleaned.includes('Unknown') ||
+                cleaned === 'Commune non spécifiée') {
+              return '';
+            }
+            
+            // Remove all apostrophes and clean the text
+            const withoutApostrophes = cleaned.replace(/['`'']/g, '');
+            
+            // Common problematic commune names and their EcoTrack equivalents (without apostrophes)
+            const communeMapping = {
+              'sidi mhamed': 'Sidi Mhamed',
+              'sidi m hamed': 'Sidi Mhamed',
+              'alger centre': 'Alger-Centre',
+              'hussein dey': 'Hussein Dey',
+              'bab el oued': 'Bab El Oued',
+              'el harrach': 'El Harrach',
+              'bir mourad rais': 'Bir Mourad Rais',
+              'el mouradia': 'El Mouradia',
+              'casbah': 'La Casbah'
+            };
+            
+            const lowerCleaned = withoutApostrophes.toLowerCase();
+            
+            // Check if we have a mapping for this commune
+            if (communeMapping[lowerCleaned]) {
+              console.log(`🔄 Mapping commune: "${cleaned}" -> "${communeMapping[lowerCleaned]}" (apostrophes removed)`);
+              return communeMapping[lowerCleaned];
+            }
+            
+            // For unmapped communes, format and remove apostrophes
+            const formatted = withoutApostrophes
+              .split(' ')
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+              .join(' ')
+              .trim();
+            
+            // If it looks suspicious, return empty string
+            if (formatted.length < 3 || formatted.length > 50) {
+              console.log(`⚠️ Suspicious commune name, using empty: "${formatted}"`);
+              return '';
+            }
+            
+            if (withoutApostrophes !== cleaned) {
+              console.log(`🔄 Removed apostrophes from commune: "${cleaned}" -> "${formatted}"`);
+            }
+            
+            return formatted;
+          }
+
+          // Validate required fields before sending
+          const requiredFields = ['reference', 'client', 'adresse', 'montant'];
+          const missingFields = requiredFields.filter(field => !ecotrackData[field] || ecotrackData[field] === '');
+          
+          if (missingFields.length > 0) {
+            console.error(`❌ Missing required fields for order ${order.id}:`, missingFields);
+            throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+          }
+
+          console.log(`📋 Sending order ${order.id} to EcoTrack with data:`, {
+            reference: ecotrackData.reference,
+            client: ecotrackData.client,
+            phone: ecotrackData.phone,
+            adresse: ecotrackData.adresse,
+            wilaya_id: ecotrackData.wilaya_id,
+            commune: ecotrackData.commune || '(empty)',
+            montant: ecotrackData.montant,
+            produit: ecotrackData.produit
+          });
+
+          // Create delivery in EcoTrack via backend API
+          const response = await fetch('/api/ecotrack/create-order', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: JSON.stringify({
+              orderData: ecotrackData,
+              orderId: order.id
+            })
+          });
+
+          if (response.ok) {
+            const apiResult = await response.json();
+            const result = apiResult.data; // Backend wraps the result
+            console.log(`✅ Order ${order.id} sent to delivery:`, result);
+            
+            // Backend now handles status update and tracking ID storage automatically
+            console.log('✅ Order status automatically updated to "out_for_delivery" by backend');
+            
+            successCount++;
+          } else {
+            const errorText = await response.text();
+            let errorMessage = `HTTP ${response.status}`;
+            
+            try {
+              const errorData = JSON.parse(errorText);
+              if (errorData.message) {
+                errorMessage += `: ${errorData.message}`;
+              }
+              if (errorData.errors) {
+                const fieldErrors = Object.entries(errorData.errors)
+                  .map(([field, messages]) => `${field}: ${messages.join(', ')}`)
+                  .join('; ');
+                errorMessage += ` (Fields: ${fieldErrors})`;
+              }
+            } catch (parseError) {
+              errorMessage += `: ${errorText}`;
+            }
+            
+            console.error(`❌ EcoTrack API Error for order ${order.id}:`, {
+              status: response.status,
+              body: errorText,
+              sentData: ecotrackData
+            });
+            
+            throw new Error(errorMessage);
+          }
+        } catch (error) {
+          console.error(`❌ Error sending order ${order.id} to delivery:`, error);
+          errorCount++;
+          errors.push(`Order ${order.order_number}: ${error.message}`);
+        }
+      }
+
+      // Show results
+      if (successCount > 0) {
+        message.success(t('orders.bulkDeliverySuccess', { count: successCount }));
+      }
+      
+      if (errorCount > 0) {
+        message.error(t('orders.bulkDeliveryErrors', { count: errorCount }));
+        console.error('Bulk delivery errors:', errors);
+      }
+
+      // Refresh orders and clear selection
+      await fetchOrders();
+      handleClearSelection();
+      setBulkDeliveryModalVisible(false);
+      
+    } catch (error) {
+      console.error('Bulk send to delivery error:', error);
+      message.error(t('orders.bulkDeliveryError') + ': ' + error.message);
+    } finally {
+      setBulkSendToDeliveryLoading(false);
+    }
+  };
+
   const viewEcotrackDetails = async (trackingId) => {
     if (!trackingId) {
       message.error(t("tracking.noTrackingId"));
+      return;
+    }
+
+    // Ensure credentials are loaded
+    if (!ecotrackCredentials) {
+      message.error(t("tracking.credentialsNotLoaded"));
       return;
     }
 
@@ -849,8 +1802,8 @@ const OrderManagement = () => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            api_token: "PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG",
-            user_guid: "2QG0JDFP",
+            api_token: ecotrackCredentials.apiToken,
+            user_guid: ecotrackCredentials.userGuid,
             trackings: [trackingId],
           }),
         }
@@ -1093,6 +2046,20 @@ const OrderManagement = () => {
   };
 
   const columns = [
+    {
+      title: t("orders.orderNumber"),
+      dataIndex: "order_number",
+      key: "order_number",
+      width: 120,
+      fixed: 'left',
+      render: (orderNumber) => (
+        <Tooltip title={orderNumber}>
+          <Text strong style={{ color: '#1890ff' }}>
+            #{orderNumber}
+          </Text>
+        </Tooltip>
+      ),
+    },
     {
       title: t("orders.customerName"),
       dataIndex: "customer_name",
@@ -1354,22 +2321,46 @@ const OrderManagement = () => {
               
               // Auto-select product based on name match
               setTimeout(async () => {
+                console.log('🚀 Starting auto-selection process for imported order...');
+                
                 if (productInfo.name) {
                   try {
+                    console.log(`🔍 Attempting to auto-select product: "${productInfo.name}"`);
                     const matchedProduct = await autoSelectProductByName(productInfo.name);
                     if (matchedProduct) {
-                      console.log('Auto-selected product:', matchedProduct.name, 'SKU:', matchedProduct.sku);
+                      console.log('✅ Auto-selected product successfully:', matchedProduct.name, 'SKU:', matchedProduct.sku);
                     } else {
-                      console.log('No matching product found for:', productInfo.name);
+                      console.log('❌ No matching product found in database for:', productInfo.name);
+                      console.log('💡 Available products:', products.map(p => p.name).slice(0, 5).join(', '), products.length > 5 ? '...' : '');
+                      
+                      // Show a notification that the product is not in the database
+                      message.info(`Product "${productInfo.name}" from Excel not found in product database. Please select manually.`, 5);
                     }
                   } catch (error) {
-                    console.warn('Error auto-selecting product:', error);
+                    console.warn('❌ Error during product auto-selection:', error);
+                  }
+                } else {
+                  console.log('⚠️ No product name in import data for auto-selection');
+                }
+
+                // Auto-select variant from Excel import data
+                if (productInfo) {
+                  try {
+                    const variantInfo = await autoSelectVariantFromExcel(productInfo);
+                    if (variantInfo) {
+                      console.log('✅ Auto-selected variant info:', variantInfo);
+                      if (variantInfo.matched_variant_name) {
+                        console.log('🎯 Matched with store variant:', variantInfo.matched_variant_name);
+                      }
+                    }
+                  } catch (error) {
+                    console.warn('❌ Error during variant auto-selection:', error);
                   }
                 }
                 
                 // Update final total after form is populated and product selection
                 updateFinalTotal();
-              }, 300);
+              }, 800); // Increased delay to ensure modal is fully loaded
             }}
           />
           {ecotrackEnabled && record.ecotrack_tracking_id && (
@@ -1428,6 +2419,67 @@ const OrderManagement = () => {
 
   return (
     <div className="orders-page">
+      {/* Statistics Section */}
+      <Card style={{ marginBottom: 24 }}>
+        <Row gutter={[16, 16]}>
+          <Col xs={12} sm={8} md={6} lg={4}>
+            <Card size="small" style={{ textAlign: 'center', backgroundColor: '#f0f9ff' }}>
+              <Statistic
+                title="En cours de livraison"
+                value={orderStats.out_for_delivery}
+                valueStyle={{ color: '#1890ff', fontSize: '20px' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={6} lg={4}>
+            <Card size="small" style={{ textAlign: 'center', backgroundColor: '#fff7e6' }}>
+              <Statistic
+                title={t("orders.statistics.pending")}
+                value={orderStats.pending}
+                valueStyle={{ color: '#fa8c16', fontSize: '20px' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={6} lg={4}>
+            <Card size="small" style={{ textAlign: 'center', backgroundColor: '#f6ffed' }}>
+              <Statistic
+                title={t("orders.statistics.confirmed")}
+                value={orderStats.confirmed}
+                valueStyle={{ color: '#52c41a', fontSize: '20px' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={6} lg={4}>
+            <Card size="small" style={{ textAlign: 'center', backgroundColor: '#e6f7ff' }}>
+              <Statistic
+                title={t("orders.statistics.processing")}
+                value={orderStats.processing}
+                valueStyle={{ color: '#13c2c2', fontSize: '20px' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={6} lg={4}>
+            <Card size="small" style={{ textAlign: 'center', backgroundColor: '#f0f5ff' }}>
+              <Statistic
+                title={t("orders.statistics.delivered")}
+                value={orderStats.delivered}
+                valueStyle={{ color: '#722ed1', fontSize: '20px' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={8} md={6} lg={4}>
+            <Card size="small" style={{ textAlign: 'center', backgroundColor: '#fff1f0' }}>
+              <Statistic
+                title={t("orders.statistics.cancelled")}
+                value={orderStats.cancelled}
+                valueStyle={{ color: '#f5222d', fontSize: '20px' }}
+              />
+            </Card>
+          </Col>
+        </Row>
+     
+      </Card>
+
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         {isAdmin && (
           <>
@@ -1458,9 +2510,59 @@ const OrderManagement = () => {
                 </Button>
               </Space>
             </Col>
+            <Col xs={24} sm={12} md={8} lg={6}>
+              <Space direction="vertical" style={{ width: "100%" }}>
+                <Button
+                  type={googleSheetsEnabled ? "primary" : "default"}
+                  block
+                  size="small"
+                  onClick={() => setGoogleSheetsModalVisible(true)}
+                  icon={<LinkOutlined />}
+                >
+                  <span className="btn-text">{t("orders.googleSheets")}</span>
+                </Button>
+              </Space>
+            </Col>
           </>
         )}
       </Row>
+
+      {/* Bulk Actions Row */}
+      {selectedRowKeys.length > 0 && (
+        <Card style={{ marginBottom: 16, backgroundColor: '#f0f5ff', border: '1px solid #d6e4ff' }}>
+          <Row gutter={[16, 8]} align="middle">
+            <Col>
+              <Text strong style={{ color: '#1890ff' }}>
+                {t('orders.selectedCount', { count: selectedRowKeys.length })}
+              </Text>
+            </Col>
+            <Col>
+              <Space>
+                <Button
+                  type="primary"
+                  icon={<TruckOutlined />}
+                  onClick={handleBulkSendToDelivery}
+                  disabled={selectedOrders.filter(order => order.status === 'confirmed').length === 0}
+                >
+                  {t('orders.sendToDelivery')}
+                </Button>
+                <Button
+                  icon={<CheckCircleOutlined />}
+                  onClick={handleSelectAll}
+                >
+                  {t('orders.selectAll')}
+                </Button>
+                <Button
+                  icon={<ExclamationCircleOutlined />}
+                  onClick={handleClearSelection}
+                >
+                  {t('orders.clearSelection')}
+                </Button>
+              </Space>
+            </Col>
+          </Row>
+        </Card>
+      )}
 
       {/* Filters */}
       <Card style={{ marginBottom: 16 }}>
@@ -1603,6 +2705,13 @@ const OrderManagement = () => {
           rowKey="id"
           loading={loading}
           size="small"
+          rowSelection={{
+            selectedRowKeys,
+            onChange: handleRowSelectionChange,
+            getCheckboxProps: (record) => ({
+              disabled: record.status !== 'confirmed', // Only enable selection for confirmed orders
+            }),
+          }}
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
@@ -1616,7 +2725,7 @@ const OrderManagement = () => {
               setPagination({ ...pagination, current: page, pageSize });
             },
           }}
-          scroll={{ x: 800 }}
+          scroll={{ x: 1200, y: 600 }}
         />
       </Card>
 
@@ -1667,9 +2776,9 @@ const OrderManagement = () => {
           <Form.Item
             name="customer_address"
             label={t("orders.customerAddress")}
-            rules={[
-              { required: true, message: t("orders.customerAddressRequired") },
-            ]}
+            // rules={[
+            //   { required: true, message: t("orders.customerAddressRequired") },
+            // ]}
           >
             <TextArea rows={2} />
           </Form.Item>
@@ -1709,39 +2818,19 @@ const OrderManagement = () => {
               </Col>
               <Col span={6}>
                 <Form.Item
-                  name="baladia_id"
+                  name="baladia_name"
                   label={t("delivery.baladia")}
                 >
-                  <Select
-                    placeholder={
-                      selectedWilaya 
-                        ? t("delivery.selectBaladia")
-                        : t("delivery.selectWilayaFirst")
-                    }
-                    showSearch
-                    optionFilterProp="children"
-                    loading={loadingBaladias}
-                    disabled={!selectedWilaya || loadingBaladias}
-                    onChange={handleDeliveryFieldChange}
-                    filterOption={(input, option) =>
-                      option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-                    }
-                    notFoundContent={
-                      loadingBaladias ? (
-                        <div style={{ textAlign: 'center', padding: '8px' }}>
-                          <Spin size="small" /> {t("common.loading")}...
-                        </div>
-                      ) : (
-                        t("delivery.noBaladias")
-                      )
-                    }
-                  >
-                    {baladias.map((baladia) => (
-                      <Option key={baladia.id} value={baladia.id}>
-                        {baladia.name_fr}
-                      </Option>
-                    ))}
-                  </Select>
+                  <Input
+                    placeholder={t("delivery.baladiaFromExcel")}
+                    prefix=""
+                    disabled
+                    style={{ 
+                      backgroundColor: '#f0f9ff',
+                      borderColor: '#3b82f6',
+                      color: '#1e40af'
+                    }}
+                  />
                 </Form.Item>
               </Col>
               <Col span={6}>
@@ -2005,7 +3094,163 @@ const OrderManagement = () => {
                     </Form.Item>
                   </Col>
                 </Row>
+
+                {/* Product Variants Section */}
+                <div style={{ 
+                  backgroundColor: '#f9f9f9', 
+                  padding: '12px', 
+                  borderRadius: '6px', 
+                  marginBottom: '16px',
+                  border: '1px solid #e0e0e0'
+                }}>
+                  <Text strong style={{ 
+                    fontSize: '13px', 
+                    color: '#666', 
+                    marginBottom: '12px', 
+                    display: 'block' 
+                  }}>
+                    🎨 {t("orders.productVariants")} {t("orders.autoSelected")}
+                  </Text>
+                  
+                  <Row gutter={8}>
+                    <Col span={12}>
+                      <Form.Item
+                        name={['product_info', 'size']}
+                        label={t("orders.size")}
+                        style={{ marginBottom: 8 }}
+                      >
+                        <Input 
+                          placeholder={t("orders.enterSize")}
+                          prefix="📏"
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        name={['product_info', 'color']}
+                        label={t("orders.color")}
+                        style={{ marginBottom: 8 }}
+                      >
+                        <Input 
+                          placeholder={t("orders.enterColor")}
+                          prefix="🎨"
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  
+                  <Row gutter={8}>
+                    <Col span={12}>
+                      <Form.Item
+                        name={['product_info', 'model']}
+                        label={t("orders.model")}
+                        style={{ marginBottom: 8 }}
+                      >
+                        <Input 
+                          placeholder={t("orders.enterModel")}
+                          prefix="🏷️"
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        name={['product_info', 'style']}
+                        label={t("orders.style")}
+                        style={{ marginBottom: 8 }}
+                      >
+                        <Input 
+                          placeholder={t("orders.enterStyle")}
+                          prefix="✨"
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  {/* Matched Variant Information - Only show when product exists in database */}
+                  {selectedProduct && (
+                    <>
+                      <Form.Item
+                        name={['product_info', 'matched_variant_name']}
+                        label={t("orders.matchedVariant")}
+                        style={{ marginBottom: 8 }}
+                      >
+                        <Input 
+                          placeholder={t("orders.matchedVariantFromStore")}
+                          prefix="✅"
+                          disabled
+                          style={{ 
+                            backgroundColor: '#f0f9ff',
+                            borderColor: '#10b981',
+                            color: '#047857'
+                          }}
+                        />
+                      </Form.Item>
+
+                      <Row gutter={8}>
+                        <Col span={12}>
+                          <Form.Item
+                            name={['product_info', 'variant']}
+                            label={t("orders.excelVariant")}
+                            style={{ marginBottom: 8 }}
+                          >
+                            <Input 
+                              placeholder={t("orders.variantFromExcel")}
+                              prefix="📋"
+                              disabled
+                              style={{ backgroundColor: '#fafafa' }}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item
+                            name={['product_info', 'variant_price']}
+                            label={t("orders.variantPrice")}
+                            style={{ marginBottom: 8 }}
+                          >
+                            <Input 
+                              placeholder={t("orders.priceFromVariant")}
+                              prefix="💰"
+                              disabled
+                              style={{ backgroundColor: '#fafafa' }}
+                            />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </>
+                  )}
+                </div>
               </div>
+
+              {/* Product Database Status Section */}
+              {!selectedProduct && form.getFieldValue(['product_info', 'name']) && (
+                <div style={{ 
+                  backgroundColor: '#fff7e6',
+                  padding: '12px', 
+                  borderRadius: '6px', 
+                  marginBottom: '16px',
+                  border: '1px solid #ffd591'
+                }}>
+                  <Text strong style={{ 
+                    fontSize: '13px', 
+                    color: '#fa8c16', 
+                    marginBottom: '8px', 
+                    display: 'block' 
+                  }}>
+                    ⚠️ {t("products.notInDatabase")}
+                  </Text>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontSize: '12px', color: '#8c8c8c' }}>
+                      "{form.getFieldValue(['product_info', 'name'])}" is not in our product database
+                    </Text>
+                    <Tag color="orange">
+                      Manual Selection Required
+                    </Tag>
+                  </div>
+                  <div style={{ marginTop: 8, color: '#fa8c16', fontSize: '12px' }}>
+                    💡 Please select an existing product from the database manually
+                  </div>
+                </div>
+              )}
 
               {/* Stock Information Section */}
               {selectedProduct && (
@@ -2062,27 +3307,29 @@ const OrderManagement = () => {
               </div>
 
               {/* External Link Section */}
-              <div style={{ 
-                backgroundColor: '#f0f8ff', 
-                padding: '12px', 
-                borderRadius: '6px', 
-                marginBottom: '8px',
-                border: '1px solid #d9d9d9'
-              }}>
-                <Text strong style={{ fontSize: '13px', color: '#1890ff', marginBottom: '8px', display: 'block' }}>
-                  🔗 {t("orders.productExternalLink")}
-                </Text>
-                <Form.Item
-                  name={['product_info', 'external_link']}
-                  style={{ marginBottom: 0 }}
-                >
-                  <Form.Item dependencies={[['product_info', 'external_link'], ['product_info', 'sku']]} noStyle>
-                    {({ getFieldValue }) => {
-                      const externalLink = getFieldValue(['product_info', 'external_link']);
-                      const currentSku = getFieldValue(['product_info', 'sku']);
-                      
-                      // Also check if we have a selected product with external_link
-                      const productExternalLink = selectedProduct?.external_link;
+              {/* Product External Link Section - Only show when product exists in database */}
+              {selectedProduct && (
+                <div style={{ 
+                  backgroundColor: '#f0f8ff', 
+                  padding: '12px', 
+                  borderRadius: '6px', 
+                  marginBottom: '8px',
+                  border: '1px solid #d9d9d9'
+                }}>
+                  <Text strong style={{ fontSize: '13px', color: '#1890ff', marginBottom: '8px', display: 'block' }}>
+                    🔗 {t("orders.productExternalLink")}
+                  </Text>
+                  <Form.Item
+                    name={['product_info', 'external_link']}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Form.Item dependencies={[['product_info', 'external_link'], ['product_info', 'sku']]} noStyle>
+                      {({ getFieldValue }) => {
+                        const externalLink = getFieldValue(['product_info', 'external_link']);
+                        const currentSku = getFieldValue(['product_info', 'sku']);
+                        
+                        // Also check if we have a selected product with external_link
+                        const productExternalLink = selectedProduct?.external_link;
                       const displayLink = externalLink || productExternalLink;
                       
                       console.log('External Link Debug:', {
@@ -2164,7 +3411,8 @@ const OrderManagement = () => {
                     }}
                   </Form.Item>
                 </Form.Item>
-              </div>
+                </div>
+              )}
 
               {/* Info Section */}
               <div style={{ 
@@ -2470,6 +3718,265 @@ const OrderManagement = () => {
             showIcon
           />
         )}
+      </Modal>
+
+      {/* Google Sheets Auto-Sync Status Modal */}
+      <Modal
+        title={
+          <Space>
+            <CheckCircleOutlined />
+            {t("orders.googleSheetsAutoSync")}
+          </Space>
+        }
+        open={googleSheetsModalVisible}
+        onCancel={() => setGoogleSheetsModalVisible(false)}
+        footer={null}
+        width={700}
+      >
+        <Space direction="vertical" style={{ width: "100%" }} size="large">
+          {/* Authentication Status */}
+          <Card size="small">
+            <Space>
+              <Text strong>{t("orders.authenticationStatus")}:</Text>
+              {googleAuthStatus?.isAuthenticated ? (
+                <Tag color="green" icon={<CheckCircleOutlined />}>
+                  {t("orders.authenticated")}
+                </Tag>
+              ) : (
+                <Tag color="red" icon={<ExclamationCircleOutlined />}>
+                  {t("orders.notAuthenticated")}
+                </Tag>
+              )}
+            </Space>
+            {!googleAuthStatus?.isAuthenticated && (
+              <div style={{ marginTop: 8 }}>
+                <Button 
+                  type="primary" 
+                  size="small"
+                  onClick={async () => {
+                    try {
+                      await googleAuthService.openAuthPopup();
+                      const status = await googleAuthService.getAuthStatus();
+                      setGoogleAuthStatus(status);
+                      message.success(t("orders.authenticationSuccess"));
+                    } catch (error) {
+                      message.error(t("orders.authenticationError"));
+                    }
+                  }}
+                >
+                  {t("orders.authenticateGoogle")}
+                </Button>
+              </div>
+            )}
+          </Card>
+
+          {/* Auto-Sync Information */}
+          <Alert
+            message={t("orders.autoSyncEnabled")}
+            description={t("orders.autoSyncDescription")}
+            type="success"
+            icon={<CheckCircleOutlined />}
+            showIcon
+          />
+
+          {/* How It Works */}
+          <Card title={t("orders.howItWorks")} size="small">
+            <Space direction="vertical" style={{ width: "100%" }}>
+              <div>
+                <Text strong>1. {t("orders.automaticImport")}</Text>
+                <br />
+                <Text type="secondary">{t("orders.automaticImportDesc")}</Text>
+              </div>
+              <div>
+                <Text strong>2. {t("orders.automaticTracking")}</Text>
+                <br />
+                <Text type="secondary">{t("orders.automaticTrackingDesc")}</Text>
+              </div>
+              <div>
+                <Text strong>3. {t("orders.automaticSync")}</Text>
+                <br />
+                <Text type="secondary">{t("orders.automaticSyncDesc")}</Text>
+              </div>
+            </Space>
+          </Card>
+
+          {/* Statistics */}
+          <Card title={t("orders.syncStatistics")} size="small">
+            <Row gutter={16}>
+              <Col span={8}>
+                <Statistic
+                  title={t("orders.ordersWithSource")}
+                  value={orders.filter(order => order.source_spreadsheet_id).length}
+                  total={orders.length}
+                  suffix={`/ ${orders.length}`}
+                />
+              </Col>
+              <Col span={8}>
+                <Statistic
+                  title={t("orders.autoSyncReady")}
+                  value={Math.round((orders.filter(order => order.source_spreadsheet_id).length / Math.max(orders.length, 1)) * 100)}
+                  suffix="%"
+                />
+              </Col>
+              <Col span={8}>
+                <Statistic
+                  title={t("orders.lastSync")}
+                  value={new Date().toLocaleTimeString()}
+                />
+              </Col>
+            </Row>
+          </Card>
+
+          {/* Configuration Options */}
+          <Form layout="vertical">
+            <Form.Item>
+              <Space>
+                <Switch
+                  checked={googleSheetsEnabled}
+                  onChange={setGoogleSheetsEnabled}
+                  disabled={!googleAuthStatus?.isAuthenticated}
+                />
+                <Text>{t("orders.enableAutoSync")}</Text>
+              </Space>
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  {t("orders.enableAutoSyncDesc")}
+                </Text>
+              </div>
+            </Form.Item>
+
+            {/* Manual Sync Section */}
+            <Form.Item>
+              <div style={{ marginBottom: 8 }}>
+                <Text strong>{t("orders.manualSync")}</Text>
+              </div>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Button
+                  type="default"
+                  icon={<SyncOutlined />}
+                  loading={loading}
+                  onClick={handleManualSyncAllOrders}
+                  disabled={!googleAuthStatus?.isAuthenticated || !googleSheetsEnabled}
+                  block
+                >
+                  {t("orders.syncNow")}
+                </Button>
+                <Button
+                  type="dashed"
+                  icon={<EyeOutlined />}
+                  onClick={() => {
+                    const ordersWithSource = allOrders.filter(order => 
+                      order.source_spreadsheet_id && 
+                      order.source_sheet_name && 
+                      order.order_number
+                    );
+                    const ordersWithPartialSource = allOrders.filter(order => 
+                      order.source_spreadsheet_id || 
+                      order.source_sheet_name || 
+                      order.source_file_name
+                    );
+                    
+                    Modal.info({
+                      title: t("orders.sourceTrackingStatus"),
+                      content: (
+                        <div>
+                          <p><strong>{t("orders.totalOrders")}:</strong> {orders.length}</p>
+                          <p><strong>{t("orders.ordersWithCompleteSource")}:</strong> {ordersWithSource.length}</p>
+                          <p><strong>{t("orders.ordersWithPartialSource")}:</strong> {ordersWithPartialSource.length}</p>
+                          <p><strong>{t("orders.ordersWithoutSource")}:</strong> {allOrders.length - ordersWithPartialSource.length}</p>
+                          <br />
+                          <p style={{ fontSize: '12px', color: '#666' }}>
+                            {t("orders.sourceTrackingExplanation")}
+                          </p>
+                        </div>
+                      ),
+                      width: 500
+                    });
+                  }}
+                  size="small"
+                  block
+                >
+                  {t("orders.checkSourceStatus")}
+                </Button>
+              </Space>
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  {t("orders.syncNowDesc")}
+                </Text>
+              </div>
+            </Form.Item>
+
+            <Form.Item>
+              <Space>
+                <Button 
+                  type="primary"
+                  onClick={() => {
+                    const newConfig = { enabled: googleSheetsEnabled, autoSync: true };
+                    setGoogleSheetsConfig(newConfig);
+                    localStorage.setItem('googleSheetsConfig', JSON.stringify(newConfig));
+                    message.success(t("orders.configurationSaved"));
+                    setGoogleSheetsModalVisible(false);
+                  }}
+                  disabled={!googleAuthStatus?.isAuthenticated}
+                >
+                  {t("common.save")}
+                </Button>
+                <Button onClick={() => setGoogleSheetsModalVisible(false)}>
+                  {t("common.close")}
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        </Space>
+      </Modal>
+
+      {/* Bulk Delivery Confirmation Modal */}
+      <Modal
+        title={t('orders.bulkDeliveryConfirmation')}
+        open={bulkDeliveryModalVisible}
+        onOk={() => executeBulkSendToDelivery()}
+        onCancel={() => setBulkDeliveryModalVisible(false)}
+        confirmLoading={bulkSendToDeliveryLoading}
+        okText={t('orders.confirmSendToDelivery')}
+        cancelText={t('common.cancel')}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>{t('orders.bulkDeliveryWarning')}</Text>
+        </div>
+        
+        <Descriptions bordered size="small" column={1}>
+          <Descriptions.Item label={t('orders.totalSelected')}>
+            {selectedRowKeys.length}
+          </Descriptions.Item>
+          <Descriptions.Item label={t('orders.confirmedOrders')}>
+            {selectedOrders.filter(order => order.status === 'confirmed').length}
+          </Descriptions.Item>
+          <Descriptions.Item label={t('orders.nonConfirmedOrders')}>
+            {selectedOrders.filter(order => order.status !== 'confirmed').length}
+          </Descriptions.Item>
+        </Descriptions>
+
+        {selectedOrders.filter(order => order.status !== 'confirmed').length > 0 && (
+          <Alert
+            message={t('orders.nonConfirmedWarning')}
+            description={t('orders.nonConfirmedDescription')}
+            type="warning"
+            showIcon
+            style={{ marginTop: 16 }}
+          />
+        )}
+
+        <div style={{ marginTop: 16 }}>
+          <Text strong>{t('orders.ordersSummary')}:</Text>
+          <div style={{ maxHeight: 200, overflow: 'auto', marginTop: 8 }}>
+            {selectedOrders.filter(order => order.status === 'confirmed').map(order => (
+              <div key={order.id} style={{ padding: '4px 0', borderBottom: '1px solid #f0f0f0' }}>
+                <Text>#{order.id} - {order.client_name} - {order.total_amount} DA</Text>
+              </div>
+            ))}
+          </div>
+        </div>
       </Modal>
     </div>
   );

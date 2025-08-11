@@ -1,3 +1,4 @@
+import { configService } from './configService';
 import api from './api';
 
 export const integrationsService = {
@@ -72,6 +73,9 @@ export const integrationsService = {
   // Ecotrack
   async createEcotrackDelivery(orderId) {
     try {
+      // Get dynamic credentials
+      const credentials = await configService.getEcotrackCredentials();
+      
       // First get order details from backend
       const orderResponse = await api.get(`/api/orders/${orderId}`);
       const order = orderResponse.data;
@@ -95,8 +99,8 @@ export const integrationsService = {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          api_token: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
-          user_guid: '2QG0JDFP',
+          api_token: credentials.apiToken,
+          user_guid: credentials.userGuid,
           ...ecotrackData
         })
       });
@@ -114,14 +118,17 @@ export const integrationsService = {
 
   async getEcotrackStatus(trackingId) {
     try {
+      // Get dynamic credentials
+      const credentials = await configService.getEcotrackCredentials();
+      
       const response = await fetch(`https://app.noest-dz.com/api/public/get/trackings/info`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          api_token: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
-          user_guid: '2QG0JDFP',
+          api_token: credentials.apiToken,
+          user_guid: credentials.userGuid,
           trackings: [trackingId]
         })
       });
@@ -163,6 +170,9 @@ export const integrationsService = {
 
   async testEcotrackConnection() {
     try {
+      // Get dynamic credentials
+      const credentials = await configService.getEcotrackCredentials();
+      
       // Test by trying to track a dummy tracking number
       const response = await fetch('https://app.noest-dz.com/api/public/get/trackings/info', {
         method: 'POST',
@@ -170,8 +180,8 @@ export const integrationsService = {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          api_token: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
-          user_guid: '2QG0JDFP',
+          api_token: credentials.apiToken,
+          user_guid: credentials.userGuid,
           trackings: ['TEST123']
         })
       });

@@ -1,0 +1,655 @@
+const { google } = require('googleapis');
+const googleAuthService = require('./googleAuth');
+const DeliveryPricingService = require('./deliveryPricingService');
+
+class GoogleSheetsService {
+  constructor() {
+    this.spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
+  }
+
+  // Get authenticated sheets client for a user
+  async getSheetsClient(userId) {
+    return await googleAuthService.getSheetsClient(userId);
+  }
+
+  // Get authenticated drive client for a user
+  async getDriveClient(userId) {
+    const auth = await googleAuthService.getAuthenticatedClient(userId);
+    return google.drive({ version: 'v3', auth });
+  }
+
+  // List all Google Sheets files accessible to the user
+  async listUserGoogleSheets(userId) {
+    try {
+      const drive = await this.getDriveClient(userId);
+      
+      console.log('🔍 Searching for Google Sheets files...');
+      
+      // Try multiple queries to find sheets
+      const queries = [
+        // All spreadsheet files (most comprehensive)
+        "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+        // Files you own
+        "mimeType='application/vnd.google-apps.spreadsheet' and 'me' in owners and trashed=false",
+        // Files shared with you
+        "mimeType='application/vnd.google-apps.spreadsheet' and sharedWithMe=true and trashed=false",
+        // Recent files (last 7 days)
+        `mimeType='application/vnd.google-apps.spreadsheet' and modifiedTime > '${new Date(Date.now() - 7*24*60*60*1000).toISOString()}' and trashed=false`,
+        // Just try without any filters except MIME type
+        "mimeType='application/vnd.google-apps.spreadsheet'"
+      ];
+      
+      let allFiles = [];
+      
+      for (const [index, query] of queries.entries()) {
+        try {
+          console.log(`📋 Query ${index + 1}: ${query}`);
+          
+          const response = await drive.files.list({
+            q: query,
+            fields: 'files(id, name, createdTime, modifiedTime, webViewLink, owners, shared, parents, mimeType)',
+            orderBy: 'modifiedTime desc',
+            pageSize: 100,
+            includeItemsFromAllDrives: true,
+            supportsAllDrives: true
+          });
+          
+          console.log(`📄 Query ${index + 1} found ${response.data.files.length} files`);
+          
+          if (response.data.files.length > 0) {
+            // Log first few files for debugging
+            response.data.files.slice(0, 3).forEach(file => {
+              console.log(`  📋 Found: "${file.name}" (ID: ${file.id})`);
+            });
+            allFiles = allFiles.concat(response.data.files);
+          }
+        } catch (queryError) {
+          console.error(`❌ Error with query ${index + 1}:`, queryError.message);
+        }
+      }
+
+      // Also try a very basic search without any filters
+      try {
+        console.log('🔍 Trying basic search without filters...');
+        const basicResponse = await drive.files.list({
+          pageSize: 50,
+          fields: 'files(id, name, mimeType, createdTime, modifiedTime)',
+          orderBy: 'modifiedTime desc'
+        });
+        
+        console.log(`📁 Basic search found ${basicResponse.data.files.length} total files`);
+        
+        // Filter for spreadsheets
+        const spreadsheets = basicResponse.data.files.filter(file => 
+          file.mimeType === 'application/vnd.google-apps.spreadsheet'
+        );
+        
+        console.log(`📊 Spreadsheets from basic search: ${spreadsheets.length}`);
+        
+        if (spreadsheets.length > 0) {
+          allFiles = allFiles.concat(spreadsheets);
+        }
+      } catch (basicError) {
+        console.error('❌ Basic search failed:', basicError.message);
+      }
+
+      // Remove duplicates based on file ID
+      const uniqueFiles = allFiles.filter((file, index, self) => 
+        index === self.findIndex(f => f.id === file.id)
+      );
+
+      console.log(`✅ Total unique Google Sheets found: ${uniqueFiles.length}`);
+
+      if (uniqueFiles.length > 0) {
+        console.log('📋 Files found:');
+        uniqueFiles.forEach((file, i) => {
+          console.log(`  ${i + 1}. "${file.name}" (${file.id}) - Modified: ${file.modifiedTime}`);
+        });
+      }
+
+      return uniqueFiles.map(file => ({
+        id: file.id,
+        name: file.name,
+        createdTime: file.createdTime,
+        modifiedTime: file.modifiedTime,
+        webViewLink: file.webViewLink,
+        isOwner: file.owners && file.owners.some(owner => owner.me),
+        isShared: file.shared || false
+      }));
+    } catch (error) {
+      console.error('Error listing Google Sheets:', error);
+      throw new Error(`Failed to list Google Sheets files: ${error.message}`);
+    }
+  }
+
+  // Get sheets within a specific Google Sheets file
+  // Get sheets within a specific Google Sheets file
+  async getSpreadsheetSheets(userId, spreadsheetId) {
+    try {
+      const sheets = await this.getSheetsClient(userId);
+      
+      const response = await sheets.spreadsheets.get({
+        spreadsheetId: spreadsheetId,
+        fields: 'sheets.properties'
+      });
+
+      return response.data.sheets.map(sheet => ({
+        sheetId: sheet.properties.sheetId,
+        title: sheet.properties.title,
+        index: sheet.properties.index,
+        rowCount: sheet.properties.gridProperties?.rowCount || 0,
+        columnCount: sheet.properties.gridProperties?.columnCount || 0
+      }));
+    } catch (error) {
+      console.error('Error getting spreadsheet sheets:', error);
+      throw new Error('Failed to get spreadsheet sheets');
+    }
+  }
+
+  // Alias for getSpreadsheetSheets (for API consistency)
+  async getSpreadsheetTabs(userId, spreadsheetId) {
+    return await this.getSpreadsheetSheets(userId, spreadsheetId);
+  }
+
+  // Preview data from a specific sheet
+  async previewSheetData(userId, spreadsheetId, sheetName = 'Sheet1', range = 'A1:L10') {
+    try {
+      const sheets = await this.getSheetsClient(userId);
+      
+      const fullRange = sheetName ? `${sheetName}!${range}` : range;
+      
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: spreadsheetId,
+        range: fullRange
+      });
+
+      return {
+        range: response.data.range,
+        values: response.data.values || [],
+        majorDimension: response.data.majorDimension
+      };
+    } catch (error) {
+      console.error('Error previewing sheet data:', error);
+      throw new Error('Failed to preview sheet data');
+    }
+  }
+
+  // Alias for previewSheetData (for API consistency)
+  async getSheetData(userId, spreadsheetId, range) {
+    return await this.previewSheetData(userId, spreadsheetId, null, range);
+  }
+
+  // Map French delivery type text to database enum values
+  mapDeliveryType(deliveryTypeText) {
+    if (!deliveryTypeText || typeof deliveryTypeText !== 'string') {
+      return 'home'; // default value
+    }
+
+    const type = deliveryTypeText.toLowerCase().trim();
+    
+    // Map French delivery types to enum values
+    if (type.includes('stop desk') || type.includes('stopdesk') || type.includes('stop-desk')) {
+      return 'pickup_point';
+    } else if (type.includes('domicile') || type.includes('home') || type.includes('maison')) {
+      return 'home';
+    } else if (type.includes('bureau') || type.includes('office') || type.includes('travail')) {
+      return 'office';
+    } else if (type.includes('express') || type.includes('rapide')) {
+      return 'express';
+    } else if (type.includes('standard') || type.includes('normal')) {
+      return 'standard';
+    } else if (type.includes('overnight') || type.includes('nuit')) {
+      return 'overnight';
+    } else if (type.includes('weekend') || type.includes('week-end')) {
+      return 'weekend';
+    } else if (type.includes('economy') || type.includes('economique')) {
+      return 'economy';
+    } else if (type.includes('les changes') || type.includes('les_changes')) {
+      return 'les_changes';
+    } else {
+      // Default to home delivery if type not recognized
+      return 'home';
+    }
+  }
+
+  // Import orders from a Google Sheet
+  async importOrdersFromSheet(spreadsheetId, sheetRange, userId) {
+    try {
+      const sheets = await this.getSheetsClient(userId);
+      const { pool } = require('../../config/database');
+      
+      // Get all data from the sheet
+      const range = sheetRange || 'Orders!A2:M'; // Extended to column M for delivery_type
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: spreadsheetId,
+        range: range
+      });
+
+      const rows = response.data.values || [];
+      
+      if (rows.length < 2) {
+        return {
+          success: false,
+          message: 'No data found to import',
+          imported: 0,
+          errors: []
+        };
+      }
+
+      // Assume first row is headers
+      const headers = rows[0];
+      const dataRows = rows.slice(1);
+      
+      const imported = [];
+      const errors = [];
+
+      for (let i = 0; i < dataRows.length; i++) {
+        const row = dataRows[i];
+        const rowNumber = i + 2; // +2 because we skip header and array is 0-indexed
+        
+        try {
+          // Map row data to order fields - NEW Excel format based on the provided image
+          // A: Order ID, B: Full name, C: Phone, D: phone 2, E: Address 1, 
+          // F: Wilaya (format: "price - Wilaya name"), G: Product name, H: Product variant, 
+          // I: remarque, J: poids, K: PICK UP, L: ECHANGE, M: STOP DESK, N: Code de station
+          
+          const orderData = {
+            order_number: row[0] || `IMPORT-${Date.now()}-${i}`, // Order ID (Column A)
+            customer_name: row[1] || '', // Full name (Column B)
+            customer_phone: row[2] || '', // Phone (Column C)
+            customer_phone_2: row[3] || '', // phone 2 (Column D)
+            customer_address: row[4] || '', // Address 1 (Column E)
+            wilaya_info: row[5] || '', // Wilaya with price format like "4200 - Bouira" (Column F)
+            product_name: row[6] || '', // Product name (Column G)
+            product_variant: row[7] || '', // Product variant (Column H)
+            notes: row[8] || '', // remarque (Column I)
+            weight: parseFloat(row[9]) || 0, // poids (Column J)
+            pick_up: row[10] || '', // PICK UP (Column K)
+            echange: row[11] || '', // ECHANGE (Column L)
+            stop_desk: row[12] || '', // STOP DESK (Column M)
+            station_code: row[13] || '', // Code de station (Column N)
+            status: 'pending',
+            payment_status: 'cod_pending'
+          };
+
+          // Parse wilaya information from "price - wilaya name" format
+          let parsedPrice = 0;
+          let wilayaName = '';
+          let wilayaCode = '';
+          
+          if (orderData.wilaya_info) {
+            const wilayaParts = orderData.wilaya_info.split(' - ');
+            if (wilayaParts.length >= 2) {
+              parsedPrice = parseFloat(wilayaParts[0]) || 0;
+              wilayaName = wilayaParts[1].trim();
+              
+              // Extract wilaya code from name (format like "09 - Blida" or just "Blida")
+              const wilayaCodeMatch = wilayaName.match(/^(\d{2})\s*-\s*(.+)$/);
+              if (wilayaCodeMatch) {
+                wilayaCode = wilayaCodeMatch[1];
+                wilayaName = wilayaCodeMatch[2].trim();
+              }
+            }
+          }
+
+          // Determine delivery type based on the delivery options
+          let deliveryType = 'home'; // default
+          if (orderData.stop_desk && orderData.stop_desk.toLowerCase().includes('oui')) {
+            deliveryType = 'pickup_point';
+          } else if (orderData.pick_up && orderData.pick_up.toLowerCase().includes('oui')) {
+            deliveryType = 'pickup_point';
+          } else if (orderData.echange && orderData.echange.toLowerCase().includes('oui')) {
+            deliveryType = 'les_changes';
+          }
+
+          // Use parsed price as total amount if available, otherwise try to extract from product info
+          orderData.total_amount = parsedPrice;
+
+          // Validate required fields
+          if (!orderData.customer_name) {
+            errors.push(`Row ${rowNumber}: Missing customer name (Full name)`);
+            continue;
+          }
+          
+          if (!orderData.customer_phone) {
+            errors.push(`Row ${rowNumber}: Missing phone number`);
+            continue;
+          }
+          
+          if (!orderData.total_amount || orderData.total_amount <= 0) {
+            errors.push(`Row ${rowNumber}: Missing or invalid price in wilaya field`);
+            continue;
+          }
+          
+          if (!wilayaName && !wilayaCode) {
+            errors.push(`Row ${rowNumber}: Missing wilaya information`);
+            continue;
+          }
+
+          // Create comprehensive product details JSON
+          const productInfo = {
+            name: orderData.product_name,
+            variant: orderData.product_variant,
+            weight: orderData.weight,
+            delivery_options: {
+              pick_up: orderData.pick_up,
+              echange: orderData.echange,
+              stop_desk: orderData.stop_desk,
+              station_code: orderData.station_code
+            }
+          };
+
+          // Look up wilaya_id from wilaya name or code
+          let wilayaId = null;
+          let resolvedWilayaCode = wilayaCode;
+          
+          if (wilayaCode) {
+            try {
+              // Try to find by exact code match first
+              const [wilayaResult] = await pool.query(
+                'SELECT id, code FROM wilayas WHERE code = ?',
+                [wilayaCode]
+              );
+              
+              if (wilayaResult.length > 0) {
+                wilayaId = wilayaResult[0].id;
+                resolvedWilayaCode = wilayaResult[0].code;
+              }
+            } catch (wilayaError) {
+              console.warn(`Could not resolve wilaya_id for code: ${wilayaCode}`, wilayaError);
+            }
+          }
+          
+          // If no code match, try to find by wilaya name
+          if (!wilayaId && wilayaName) {
+            try {
+              const [wilayaNameResult] = await pool.query(
+                'SELECT id, code FROM wilayas WHERE LOWER(name_fr) LIKE ? OR LOWER(name_en) LIKE ? OR LOWER(name_ar) LIKE ?',
+                [`%${wilayaName.toLowerCase()}%`, `%${wilayaName.toLowerCase()}%`, `%${wilayaName.toLowerCase()}%`]
+              );
+              
+              if (wilayaNameResult.length > 0) {
+                wilayaId = wilayaNameResult[0].id;
+                resolvedWilayaCode = wilayaNameResult[0].code;
+              }
+            } catch (wilayaError) {
+              console.warn(`Could not resolve wilaya_id for name: ${wilayaName}`, wilayaError);
+            }
+          }
+
+          // Look up baladia_id with multilingual support (Arabic/French/English)
+          let baladiaId = null;
+          if (orderData.customer_address && orderData.customer_address.trim() && wilayaId) {
+            try {
+              const addressText = orderData.customer_address.trim();
+              
+              // Split address into words for better matching
+              const addressWords = addressText.toLowerCase().split(/\s+/);
+              
+              // Try multiple approaches for baladia lookup
+              let baladiaFound = false;
+              
+              // 1. First try exact match with full address
+              if (!baladiaFound) {
+                const [exactResult] = await pool.query(`
+                  SELECT id, name_ar, name_fr, name_en FROM baladias 
+                  WHERE wilaya_id = ? AND (
+                    LOWER(name_ar) = ? OR 
+                    LOWER(name_fr) = ? OR 
+                    LOWER(name_en) = ?
+                  )
+                  LIMIT 1
+                `, [wilayaId, addressText.toLowerCase(), addressText.toLowerCase(), addressText.toLowerCase()]);
+                
+                if (exactResult.length > 0) {
+                  baladiaId = exactResult[0].id;
+                  baladiaFound = true;
+                  console.log(`✅ Found baladia by exact match: ${exactResult[0].name_fr || exactResult[0].name_en || exactResult[0].name_ar}`);
+                }
+              }
+              
+              // 2. Try partial match with full address
+              if (!baladiaFound) {
+                const [partialResult] = await pool.query(`
+                  SELECT id, name_ar, name_fr, name_en FROM baladias 
+                  WHERE wilaya_id = ? AND (
+                    LOWER(name_ar) LIKE ? OR 
+                    LOWER(name_fr) LIKE ? OR 
+                    LOWER(name_en) LIKE ? OR
+                    ? LIKE CONCAT('%', LOWER(name_ar), '%') OR
+                    ? LIKE CONCAT('%', LOWER(name_fr), '%') OR
+                    ? LIKE CONCAT('%', LOWER(name_en), '%')
+                  )
+                  ORDER BY (
+                    CASE 
+                      WHEN LOWER(name_fr) = ? THEN 1
+                      WHEN LOWER(name_en) = ? THEN 1
+                      WHEN LOWER(name_ar) = ? THEN 1
+                      WHEN LOWER(name_fr) LIKE ? THEN 2
+                      WHEN LOWER(name_en) LIKE ? THEN 2
+                      WHEN LOWER(name_ar) LIKE ? THEN 2
+                      ELSE 3
+                    END
+                  )
+                  LIMIT 1
+                `, [
+                  wilayaId, 
+                  `%${addressText.toLowerCase()}%`, `%${addressText.toLowerCase()}%`, `%${addressText.toLowerCase()}%`,
+                  addressText.toLowerCase(), addressText.toLowerCase(), addressText.toLowerCase(),
+                  addressText.toLowerCase(), addressText.toLowerCase(), addressText.toLowerCase(),
+                  `%${addressText.toLowerCase()}%`, `%${addressText.toLowerCase()}%`, `%${addressText.toLowerCase()}%`
+                ]);
+                
+                if (partialResult.length > 0) {
+                  baladiaId = partialResult[0].id;
+                  baladiaFound = true;
+                  console.log(`✅ Found baladia by partial match: ${partialResult[0].name_fr || partialResult[0].name_en || partialResult[0].name_ar}`);
+                }
+              }
+              
+              // 3. Try word-by-word matching for complex addresses
+              if (!baladiaFound && addressWords.length > 1) {
+                for (const word of addressWords) {
+                  if (word.length >= 3) { // Only check words with 3+ characters
+                    const [wordResult] = await pool.query(`
+                      SELECT id, name_ar, name_fr, name_en FROM baladias 
+                      WHERE wilaya_id = ? AND (
+                        LOWER(name_ar) LIKE ? OR 
+                        LOWER(name_fr) LIKE ? OR 
+                        LOWER(name_en) LIKE ?
+                      )
+                      LIMIT 1
+                    `, [wilayaId, `%${word}%`, `%${word}%`, `%${word}%`]);
+                    
+                    if (wordResult.length > 0) {
+                      baladiaId = wordResult[0].id;
+                      baladiaFound = true;
+                      console.log(`✅ Found baladia by word match '${word}': ${wordResult[0].name_fr || wordResult[0].name_en || wordResult[0].name_ar}`);
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              if (!baladiaFound) {
+                console.warn(`⚠️ Could not find baladia for address: "${addressText}" in wilaya ${wilayaId}`);
+              }
+              
+            } catch (baladiaError) {
+              console.error(`❌ Error resolving baladia_id for address: ${orderData.customer_address}`, baladiaError);
+            }
+          }
+
+          // Calculate delivery price based on wilaya and delivery type
+          let deliveryPrice = orderData.total_amount; // Use the price from Excel as base
+          if (wilayaId) {
+            try {
+              const pricingResult = await DeliveryPricingService.calculateDeliveryPrice(
+                wilayaId,
+                deliveryType,
+                orderData.weight || 1.0,
+                0 // volume - default to 0
+              );
+              
+              // If delivery service calculates a different price, you can choose to use it or keep Excel price
+              console.log(`✅ Calculated delivery price for wilaya ${wilayaId}: ${pricingResult.price} DA (Excel: ${orderData.total_amount} DA)`);
+              // Using Excel price for now: deliveryPrice = pricingResult.price;
+            } catch (pricingError) {
+              console.warn(`Could not calculate delivery price for wilaya ${wilayaId}:`, pricingError);
+              // Keep the price from Excel file
+          }
+
+          // Calculate delivery price based on wilaya and delivery type
+          let deliveryPrice = orderData.total_amount; // Use the price from Excel as base
+          if (wilayaId) {
+            try {
+              const pricingResult = await DeliveryPricingService.calculateDeliveryPrice(
+                wilayaId,
+                deliveryType,
+                orderData.weight || 1.0,
+                0 // volume - default to 0
+              );
+              
+              // If delivery service calculates a different price, you can choose to use it or keep Excel price
+              console.log(`✅ Calculated delivery price for wilaya ${wilayaId}: ${pricingResult.price} DA (Excel: ${orderData.total_amount} DA)`);
+              // Using Excel price for now: deliveryPrice = pricingResult.price;
+            } catch (pricingError) {
+              console.warn(`Could not calculate delivery price for wilaya ${wilayaId}:`, pricingError);
+              // Keep the price from Excel file
+            }
+          }
+
+          // Insert into database with NEW Excel format mapping
+          const [result] = await pool.query(`
+            INSERT INTO orders (
+              order_number, customer_name, customer_phone, customer_phone_2,
+              customer_address, product_details, total_amount, status,
+              payment_status, notes, created_at, assigned_to,
+              wilaya_code, wilaya_id, baladia_id, weight, delivery_type, delivery_price
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            orderData.order_number, // Order ID from Excel
+            orderData.customer_name, // Full name from Excel
+            orderData.customer_phone, // Phone from Excel
+            orderData.customer_phone_2, // Phone 2 from Excel
+            orderData.customer_address, // Address 1 from Excel
+            JSON.stringify(productInfo), // Product info with variant and delivery options
+            orderData.total_amount, // Price from wilaya field in Excel
+            orderData.status,
+            orderData.payment_status,
+            orderData.notes, // remarque from Excel
+            null, // assigned_to - NOT assigned to anyone
+            resolvedWilayaCode, // resolved wilaya code
+            wilayaId, // resolved wilaya_id for proper relationships
+            baladiaId, // resolved baladia_id for proper relationships
+            orderData.weight, // poids from Excel
+            deliveryType, // determined from PICK UP/ECHANGE/STOP DESK columns
+            deliveryPrice // price from Excel wilaya field
+          ]);
+
+          console.log(`✅ Successfully imported order ${orderData.order_number} for ${orderData.customer_name}`);
+
+          imported.push({
+            id: result.insertId,
+            order_number: orderData.order_number,
+            customer_name: orderData.customer_name,
+            total_amount: orderData.total_amount
+          });
+
+        } catch (error) {
+          console.error(`Error importing row ${rowNumber}:`, error);
+          errors.push(`Row ${rowNumber}: ${error.message}`);
+        }
+      }
+
+      return {
+        success: true,
+        message: `Successfully imported ${imported.length} orders`,
+        imported: imported.length,
+        total: dataRows.length,
+        errors: errors,
+        importedOrders: imported.slice(0, 10) // Return first 10 for preview
+      };
+
+    } catch (error) {
+      console.error('Error importing orders from sheet:', error);
+      throw new Error('Failed to import orders from Google Sheet');
+    }
+  }
+
+  // Check if user can access Google Sheets
+  async canUserAccessSheets(userId) {
+    return await googleAuthService.isUserAuthenticated(userId);
+  }
+
+  // Get basic sheet info (for existing spreadsheet functionality)
+  async getSheetInfo(userId) {
+    try {
+      const sheets = await this.getSheetsClient(userId);
+
+      if (!this.spreadsheetId) {
+        throw new Error('No spreadsheet ID configured');
+      }
+
+      const response = await sheets.spreadsheets.get({
+        spreadsheetId: this.spreadsheetId
+      });
+
+      return {
+        title: response.data.properties.title,
+        sheets: response.data.sheets.map(sheet => ({
+          title: sheet.properties.title,
+          sheetId: sheet.properties.sheetId,
+          gridProperties: sheet.properties.gridProperties
+        }))
+      };
+    } catch (error) {
+      console.error('❌ Failed to get sheet info:', error.message);
+      throw error;
+    }
+  }
+
+  // Export orders to Google Sheets (existing functionality)
+  async exportOrders(userId, orders) {
+    try {
+      const sheets = await this.getSheetsClient(userId);
+
+      if (!this.spreadsheetId) {
+        throw new Error('No spreadsheet ID configured');
+      }
+
+      const values = orders.map(order => [
+        order.order_number,
+        order.customer_name,
+        order.customer_phone,
+        order.customer_address,
+        order.customer_city,
+        JSON.stringify(order.product_details),
+        order.total_amount,
+        order.status,
+        order.payment_status,
+        new Date(order.created_at).toISOString(),
+        order.delivery_date || '',
+        order.notes || '',
+        order.delivery_type || 'home' // Type de Livraison
+      ]);
+
+      const response = await sheets.spreadsheets.values.append({
+        spreadsheetId: this.spreadsheetId,
+        range: 'Orders!A:M', // Extended to column M for delivery_type
+        valueInputOption: 'RAW',
+        resource: {
+          values
+        }
+      });
+
+      console.log('✅ Orders exported to Google Sheets');
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to export orders:', error.message);
+      throw error;
+    }
+  }
+}
+
+module.exports = new GoogleSheetsService();

@@ -117,6 +117,37 @@ class GoogleAuthService {
     }
   }
 
+  // Update order status in Google Sheets
+  async updateOrderStatusInSheet(spreadsheetId, orderNumber, newStatus, sheetName = 'Sheet1') {
+    try {
+      const response = await api.post('/google/update-order-status', {
+        spreadsheetId,
+        orderNumber,
+        newStatus,
+        sheetName
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error updating order status in Google Sheets:', error);
+      throw error;
+    }
+  }
+
+  // Batch update order statuses in Google Sheets
+  async batchUpdateOrderStatusInSheet(spreadsheetId, orderUpdates, sheetName = 'Sheet1') {
+    try {
+      const response = await api.post('/google/batch-update-order-status', {
+        spreadsheetId,
+        orderUpdates,
+        sheetName
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error batch updating order statuses in Google Sheets:', error);
+      throw error;
+    }
+  }
+
   // Open Google authorization in popup window
   openAuthPopup() {
     return new Promise(async (resolve, reject) => {

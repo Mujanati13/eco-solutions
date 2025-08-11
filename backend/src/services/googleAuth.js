@@ -286,6 +286,17 @@ class GoogleAuthService {
       throw new Error('Failed to create authenticated Google Sheets client');
     }
   }
+
+  // Get authenticated Google Drive client for a user
+  async getDriveClient(userId) {
+    try {
+      const authClient = await this.getAuthenticatedClient(userId);
+      return google.drive({ version: 'v3', auth: authClient });
+    } catch (error) {
+      console.error('Error creating drive client:', error);
+      throw new Error('Failed to create authenticated Google Drive client');
+    }
+  }
 }
 
 module.exports = new GoogleAuthService();

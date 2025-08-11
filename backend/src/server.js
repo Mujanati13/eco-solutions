@@ -29,6 +29,8 @@ const variantsRoutes = require('./routes/variants');
 const googleAuthRoutes = require('./routes/googleAuth');
 const deliveryPricingRoutes = require('./routes/delivery-pricing');
 const orderProductRoutes = require('./routes/orderProduct');
+const ecotrackRoutes = require('./routes/ecotrack');
+const autoImportRoutes = require('./routes/autoImport');
 
 const app = express();
 const server = http.createServer(app);
@@ -85,6 +87,8 @@ app.use('/api/variants', variantsRoutes);
 app.use('/api/google', googleAuthRoutes);
 app.use('/api/delivery-pricing', deliveryPricingRoutes);
 app.use('/api/order-product', orderProductRoutes);
+app.use('/api/auto-import', autoImportRoutes);
+app.use('/api/ecotrack', ecotrackRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -134,7 +138,7 @@ const startServer = async () => {
     // Initialize Socket.IO
     socketService.initialize(server);
     
-    server.listen(PORT, () => {
+    server.listen(PORT, async () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
@@ -148,6 +152,23 @@ const startServer = async () => {
       
       // Start session timeout service for automatic pause/resume
       sessionTimeoutService.start();
+      
+      // Initialize and start auto Google Sheets importer
+      try {
+        const AutoGoogleSheetsImporter = require('./services/autoGoogleSheetsImporter');
+        const autoImporter = new AutoGoogleSheetsImporter();
+        const initialized = await autoImporter.initialize();
+        
+        if (initialized) {
+          // Start automatic scanning every 30 minutes by default
+          autoImporter.startAutomaticScanning('*/5 * * * *');
+          console.log('🤖 Auto Google Sheets importer started (every 30 minutes)');
+        } else {
+          console.log('⚠️  Auto Google Sheets importer not started - admin user not found or not authenticated');
+        }
+      } catch (error) {
+        console.error('⚠️  Failed to start auto importer:', error.message);
+      }
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);

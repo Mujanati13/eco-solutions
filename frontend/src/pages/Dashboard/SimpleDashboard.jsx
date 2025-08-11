@@ -180,7 +180,7 @@ const SimpleDashboard = () => {
     },
     series: [
       {
-        name: t('dashboard.totalOrders'),
+        name: "Commandes en cours de livraison",
         type: 'bar',
         data: performance.map(item => item.total_orders),
         itemStyle: { color: '#1890ff' }
@@ -263,8 +263,8 @@ const SimpleDashboard = () => {
             <Col xs={24} sm={12} md={6}>
               <Card>
                 <Statistic
-                  title={t('dashboard.totalOrders')}
-                  value={stats.totalOrders || 0}
+                  title="Total de commandes en cours de livraison"
+                  value={stats.outForDeliveryOrders || 0}
                   prefix={<ShoppingCartOutlined />}
                   valueStyle={{ color: '#1890ff' }}
                 />

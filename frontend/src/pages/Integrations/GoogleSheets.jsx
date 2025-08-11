@@ -19,7 +19,14 @@ import {
   Switch,
   Tooltip,
   Progress,
-  Collapse
+  Collapse,
+  Table,
+  Badge,
+  Timeline,
+  Descriptions,
+  notification,
+  Select,
+  DatePicker
 } from 'antd';
 import {
   CloudUploadOutlined,
@@ -30,153 +37,250 @@ import {
   InfoCircleOutlined,
   GoogleOutlined,
   RocketOutlined,
-  ImportOutlined
+  ImportOutlined,
+  PlayCircleOutlined,
+  PauseCircleOutlined,
+  EyeOutlined,
+  ReloadOutlined,
+  FileOutlined,
+  ClockCircleOutlined,
+  BarChartOutlined,
+  SettingOutlined,
+  DatabaseOutlined,
+  BellOutlined
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { integrationsService } from '../../services/integrationsService';
 import { usePermissions } from '../../hooks/usePermissions';
 import GoogleSheetsConnection from '../../components/GoogleSheetsConnection';
-import GoogleSheetsImporter from '../../components/GoogleSheetsImporter';
 import './GoogleSheets.css';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
+const { Option } = Select;
+const { RangePicker } = DatePicker;
 
-const GoogleSheets = () => {
+const GoogleSheetsAutoImport = () => {
   const [loading, setLoading] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState(null);
-  const [sheetInfo, setSheetInfo] = useState(null);
-  const [lastSync, setLastSync] = useState(null);
-  const [importModalVisible, setImportModalVisible] = useState(false);
-  const [ecotrackImportModalVisible, setEcotrackImportModalVisible] = useState(false);
-  const [customRange, setCustomRange] = useState('');
-  const [importResult, setImportResult] = useState(null);
-  const [ecotrackImportResult, setEcotrackImportResult] = useState(null);
-  const [skipDuplicates, setSkipDuplicates] = useState(true);
-  const [importProgress, setImportProgress] = useState(0);
+  const [autoScanStatus, setAutoScanStatus] = useState(false);
+  const [statistics, setStatistics] = useState(null);
+  const [processedFiles, setProcessedFiles] = useState([]);
+  const [scanProgress, setScanProgress] = useState(null);
+  const [realtimeUpdates, setRealtimeUpdates] = useState(true);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [cronPattern, setCronPattern] = useState('*/5 * * * *'); // Default: every 5 minutes
+  const [fileNamePatterns, setFileNamePatterns] = useState([
+    'order', 'commande', 'cmd', 'livraison', 'delivery', 'client', 'vente', 'boutique'
+  ]);
+  const [lastScanTime, setLastScanTime] = useState(null);
+  const [scanHistory, setScanHistory] = useState([]);
   
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
-  const [form] = Form.useForm();
 
   useEffect(() => {
     checkConnection();
-    loadSheetInfo();
-  }, []);
+    loadStatistics();
+    loadProcessedFiles();
+    
+    // Set up periodic updates if realtime is enabled
+    let interval;
+    if (realtimeUpdates) {
+      interval = setInterval(() => {
+        loadStatistics();
+        loadProcessedFiles();
+      }, 30000); // Update every 30 seconds
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [realtimeUpdates]);
+
   const checkConnection = async () => {
     try {
       setLoading(true);
       const result = await integrationsService.testGoogleSheetsConnection();
       setConnectionStatus('connected');
-      message.success(t('integrations.googleSheets.connectionSuccess'));
     } catch (error) {
       setConnectionStatus('disconnected');
       console.error('Connection test failed:', error);
-      // message.error(t('integrations.googleSheets.connectionFailed'));
     } finally {
       setLoading(false);
     }
   };
 
-  const loadSheetInfo = async () => {
+  const loadStatistics = async () => {
     try {
-      const info = await integrationsService.getGoogleSheetsInfo();
-      setSheetInfo(info);
-    } catch (error) {
-      console.error('Failed to load sheet info:', error);
-    }
-  };
-
-  const handleImport = async (values) => {
-    try {
-      setLoading(true);
-      const sheetRange = values?.sheetRange || 'Orders!A2:M'; // Extended to include delivery type
-      const result = await integrationsService.importFromGoogleSheets(sheetRange);
-      
-      setImportResult(result);
-      setImportModalVisible(false);
-      
-      if (result.imported > 0) {
-        message.success(t('integrations.googleSheets.importSuccess', { count: result.imported }));
-      } else {
-        message.info(t('integrations.googleSheets.noData'));
-      }
-      
-      setLastSync(new Date().toISOString());
-    } catch (error) {
-      message.error(t('integrations.googleSheets.importError'));
-      console.error('Import error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleExport = async () => {
-    try {
-      setLoading(true);
-      const result = await integrationsService.exportToGoogleSheets();
-      message.success(t('integrations.googleSheets.exportSuccess', { count: result.count }));
-      setLastSync(new Date().toISOString());
-    } catch (error) {
-      message.error(t('integrations.googleSheets.exportError'));
-      console.error('Export error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEcotrackImport = async (values) => {
-    try {
-      setLoading(true);
-      setImportProgress(0);
-      
-      const sheetRange = values?.sheetRange || 'Orders!A2:M'; // Extended to include delivery type
-      
-      // Update progress periodically
-      const progressInterval = setInterval(() => {
-        setImportProgress(prev => Math.min(prev + 10, 90));
-      }, 500);
-      
-      const result = await integrationsService.importFromGoogleSheetsToEcotrack(sheetRange, {
-        createEcotrackDeliveries: false, // Only save to database, no Ecotrack
-        skipDuplicates,
-        saveToDatabase: true
+      const response = await fetch('/api/auto-import/stats', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
       });
       
-      clearInterval(progressInterval);
-      setImportProgress(100);
-      
-      setEcotrackImportResult(result);
-      setEcotrackImportModalVisible(false);
-      
-      if (result.success && result.imported > 0) {
-        message.success(t('integrations.googleSheets.importSuccess', { count: result.imported }));
-
-        // Show database save status
-        if (result.databaseSaved) {
-          message.info(t('integrations.googleSheets.ordersSavedToDatabase', { count: result.databaseSaved }));
+      if (response.ok) {
+        const data = await response.json();
+        setStatistics(data.stats);
+        setAutoScanStatus(!data.stats.isRunning);
+        
+        if (data.stats.last_run) {
+          setLastScanTime(new Date(data.stats.last_run));
         }
-        if (result.databaseFailed && result.databaseFailed > 0) {
-          message.warning(t('integrations.googleSheets.databaseSaveWarning', { count: result.databaseFailed }));
-        }
-      } else if (result.count === 0) {
-        message.info(t('integrations.googleSheets.noData'));
-      } else {
-        message.warning(t('integrations.googleSheets.partialImport', { 
-          imported: result.imported, 
-          total: result.count 
-        }));
       }
-      
-      setLastSync(new Date().toISOString());
     } catch (error) {
-      console.error('Import error:', error);
-      message.error(t('integrations.googleSheets.importError'));
-    } finally {
-      setLoading(false);
-      setImportProgress(0);
+      console.error('Failed to load statistics:', error);
     }
   };
+
+  const loadProcessedFiles = async () => {
+    try {
+      const response = await fetch('/api/auto-import/processed-files', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setProcessedFiles(data.files || []);
+      }
+    } catch (error) {
+      console.error('Failed to load processed files:', error);
+    }
+  };
+
+  const handleManualScan = async () => {
+    try {
+      setLoading(true);
+      setScanProgress({ current: 0, total: 100, status: 'Scanning Google Drive...' });
+      
+      const response = await fetch('/api/auto-import/scan-all', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        notification.success({
+          message: 'Scan Completed',
+          description: `Found ${result.results.newFiles} new files and imported ${result.results.totalOrdersImported} orders`,
+          duration: 5
+        });
+        
+        // Update scan history
+        setScanHistory(prev => [
+          {
+            timestamp: new Date(),
+            type: 'manual',
+            filesProcessed: result.results.processedFiles,
+            ordersImported: result.results.totalOrdersImported,
+            errors: result.results.errors.length
+          },
+          ...prev.slice(0, 9) // Keep last 10 scans
+        ]);
+        
+        // Refresh data
+        await loadStatistics();
+        await loadProcessedFiles();
+      } else {
+        message.error(result.error || 'Scan failed');
+      }
+    } catch (error) {
+      console.error('Manual scan error:', error);
+      message.error('Failed to perform scan');
+    } finally {
+      setLoading(false);
+      setScanProgress(null);
+    }
+  };
+
+  const handleToggleAutoScan = async () => {
+    try {
+      setLoading(true);
+      
+      const endpoint = autoScanStatus ? '/api/auto-import/stop-auto-scan' : '/api/auto-import/start-auto-scan';
+      const method = 'POST';
+      const body = autoScanStatus ? {} : { cronPattern };
+      
+      const response = await fetch(endpoint, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setAutoScanStatus(!autoScanStatus);
+        message.success(result.message);
+      } else {
+        message.error(result.error);
+      }
+    } catch (error) {
+      console.error('Toggle auto scan error:', error);
+      message.error('Failed to toggle automatic scanning');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Columns for processed files table
+  const processedFilesColumns = [
+    {
+      title: 'File Name',
+      dataIndex: 'file_name',
+      key: 'file_name',
+      render: (text) => (
+        <Space>
+          <FileOutlined />
+          <Text ellipsis style={{ maxWidth: 300 }}>{text}</Text>
+        </Space>
+      )
+    },
+    {
+      title: 'Orders Imported',
+      dataIndex: 'orders_imported',
+      key: 'orders_imported',
+      render: (count) => (
+        <Badge count={count} style={{ backgroundColor: count > 0 ? '#52c41a' : '#d9d9d9' }} />
+      )
+    },
+    {
+      title: 'Last Modified',
+      dataIndex: 'last_modified',
+      key: 'last_modified',
+      render: (date) => new Date(date).toLocaleDateString()
+    },
+    {
+      title: 'Processed',
+      dataIndex: 'last_processed',
+      key: 'last_processed',
+      render: (date) => (
+        <Tooltip title={new Date(date).toLocaleString()}>
+          <Text type="secondary">{new Date(date).toLocaleDateString()}</Text>
+        </Tooltip>
+      )
+    }
+  ];
+
+  // Cron pattern options
+  const cronOptions = [
+    { label: 'Every 5 minutes', value: '*/5 * * * *' },
+    { label: 'Every 15 minutes', value: '*/15 * * * *' },
+    { label: 'Every 30 minutes', value: '*/30 * * * *' },
+    { label: 'Every hour', value: '0 * * * *' },
+    { label: 'Every 2 hours', value: '0 */2 * * *' },
+    { label: 'Every 6 hours', value: '0 */6 * * *' },
+    { label: 'Daily at 9 AM', value: '0 9 * * *' },
+    { label: 'Custom', value: 'custom' }
+  ];
 
   if (!hasPermission('canViewIntegrations')) {
     return (
@@ -195,82 +299,293 @@ const GoogleSheets = () => {
       <div className="google-sheets-header">
         <Title level={2}>
           <GoogleOutlined className="google-sheets-icon" />
-          {t('integrations.googleSheets.title')}
+          Automatic Google Sheets Monitor
         </Title>
-        <Text type="secondary">{t('integrations.googleSheets.subtitle')}</Text>
+        <Text type="secondary">
+          Monitor and automatically import orders from your connected shops
+        </Text>
       </div>
 
-      {/* Google Sheets Connection Section */}
-      <div style={{ marginBottom: 24 }}>
-        <GoogleSheetsConnection />
-      </div>
-
-      {/* Google Sheets Importer Section */}
-      <div style={{ marginBottom: 24 }}>
-        <GoogleSheetsImporter 
-          onImportSuccess={(result) => {
-            // Handle successful import
-            message.success(`Successfully imported ${result.imported} orders from Google Sheets`);
-            // You could refresh order data here or trigger other actions
-          }}
-        />
-      </div>
-
-     
-
-      {/* Import Modal */}
-      <Modal
-        title={t('integrations.googleSheets.databaseImportTitle')}
-        open={ecotrackImportModalVisible}
-        onCancel={() => setEcotrackImportModalVisible(false)}
-        footer={null}
-        width={700}
-      >
-        <Form form={form} onFinish={handleEcotrackImport} layout="vertical">
-          <Form.Item
-            label={t('integrations.googleSheets.sheetRange')}
-            name="sheetRange"
-            initialValue="Orders!A2:M"
-            tooltip={t('integrations.googleSheets.sheetRangeTooltip')}
-          >
-            <Input placeholder="Orders!A2:M" />
-          </Form.Item>
-
-          <Form.Item label={t('integrations.googleSheets.options')}>
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text>{t('integrations.googleSheets.skipDuplicates')}</Text>
-                <Switch
-                  checked={skipDuplicates}
-                  onChange={setSkipDuplicates}
-                />
-              </div>
+      {/* Connection Status Card */}
+      <Card style={{ marginBottom: 24 }}>
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} md={12}>
+            <GoogleSheetsConnection />
+          </Col>
+          <Col xs={24} md={12}>
+            <Space size="large" style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <Button
+                icon={<SettingOutlined />}
+                onClick={() => setSettingsVisible(true)}
+              >
+                Settings
+              </Button>
+              <Switch
+                checked={realtimeUpdates}
+                onChange={setRealtimeUpdates}
+                checkedChildren="Live"
+                unCheckedChildren="Manual"
+              />
             </Space>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* Statistics Overview */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} sm={12} lg={6}>
+          <Card>
+            <Statistic
+              title="Total Files Processed"
+              value={statistics?.total_files_processed || 0}
+              prefix={<FileOutlined />}
+              valueStyle={{ color: '#1890ff' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card>
+            <Statistic
+              title="Orders Imported"
+              value={statistics?.total_orders_imported || 0}
+              prefix={<DatabaseOutlined />}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card>
+            <Statistic
+              title="Average per File"
+              value={statistics?.avg_orders_per_file || 0}
+              precision={1}
+              prefix={<BarChartOutlined />}
+              valueStyle={{ color: '#faad14' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card>
+            <Statistic
+              title="Auto Scan Status"
+              value={autoScanStatus ? "Running" : "Stopped"}
+              prefix={autoScanStatus ? <PlayCircleOutlined /> : <PauseCircleOutlined />}
+              valueStyle={{ color: autoScanStatus ? '#52c41a' : '#ff4d4f' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Control Panel */}
+      <Card title="Control Panel" style={{ marginBottom: 24 }}>
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} md={8}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Button
+                type="primary"
+                icon={<SyncOutlined />}
+                loading={loading}
+                onClick={handleManualScan}
+                size="large"
+                block
+              >
+                Scan All Files Now
+              </Button>
+              {lastScanTime && (
+                <Text type="secondary">
+                  Last scan: {lastScanTime.toLocaleString()}
+                </Text>
+              )}
+            </Space>
+          </Col>
+          <Col xs={24} md={8}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Button
+                type={autoScanStatus ? "danger" : "default"}
+                icon={autoScanStatus ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                loading={loading}
+                onClick={handleToggleAutoScan}
+                size="large"
+                block
+              >
+                {autoScanStatus ? 'Stop Auto Scan' : 'Start Auto Scan'}
+              </Button>
+              <Text type="secondary">
+                Frequency: {cronPattern === '*/5 * * * *' ? 'Every 5 minutes' : 
+                          cronPattern === '*/15 * * * *' ? 'Every 15 minutes' :
+                          cronPattern === '*/30 * * * *' ? 'Every 30 minutes' : 
+                          cronPattern === '0 * * * *' ? 'Every hour' : 'Custom'}
+              </Text>
+            </Space>
+          </Col>
+          <Col xs={24} md={8}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => {
+                  loadStatistics();
+                  loadProcessedFiles();
+                }}
+                size="large"
+                block
+              >
+                Refresh Data
+              </Button>
+              <Text type="secondary">
+                Real-time updates: {realtimeUpdates ? 'Enabled' : 'Disabled'}
+              </Text>
+            </Space>
+          </Col>
+        </Row>
+
+        {/* Scan Progress */}
+        {scanProgress && (
+          <div style={{ marginTop: 16 }}>
+            <Progress
+              percent={scanProgress.current}
+              status="active"
+              format={() => scanProgress.status}
+            />
+          </div>
+        )}
+      </Card>
+
+      {/* Recent Activity */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} lg={12}>
+          <Card title="Recent Scan History" size="small">
+            {scanHistory.length > 0 ? (
+              <Timeline size="small">
+                {scanHistory.map((scan, index) => (
+                  <Timeline.Item
+                    key={index}
+                    color={scan.errors > 0 ? 'red' : 'green'}
+                    dot={scan.type === 'manual' ? <SyncOutlined /> : <ClockCircleOutlined />}
+                  >
+                    <div>
+                      <Text strong>{scan.type === 'manual' ? 'Manual' : 'Auto'} Scan</Text>
+                      <br />
+                      <Text type="secondary">{scan.timestamp.toLocaleString()}</Text>
+                      <br />
+                      <Space size="small">
+                        <Tag color="blue">{scan.filesProcessed} files</Tag>
+                        <Tag color="green">{scan.ordersImported} orders</Tag>
+                        {scan.errors > 0 && <Tag color="red">{scan.errors} errors</Tag>}
+                      </Space>
+                    </div>
+                  </Timeline.Item>
+                ))}
+              </Timeline>
+            ) : (
+              <Text type="secondary">No scan history available</Text>
+            )}
+          </Card>
+        </Col>
+        
+        <Col xs={24} lg={12}>
+          <Card title="File Name Patterns" size="small">
+            <Paragraph type="secondary">
+              Files matching these patterns will be automatically processed:
+            </Paragraph>
+            <Space wrap>
+              {fileNamePatterns.map((pattern, index) => (
+                <Tag key={index} color="processing">
+                  {pattern}*
+                </Tag>
+              ))}
+            </Space>
+            <div style={{ marginTop: 12 }}>
+              <Button size="small" onClick={() => setSettingsVisible(true)}>
+                Configure Patterns
+              </Button>
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Processed Files Table */}
+      <Card title="Recently Processed Files">
+        <Table
+          columns={processedFilesColumns}
+          dataSource={processedFiles}
+          rowKey="spreadsheet_id"
+          pagination={{ pageSize: 10 }}
+          loading={loading}
+          size="small"
+          scroll={{ x: 800 }}
+        />
+      </Card>
+
+      {/* Settings Modal */}
+      <Modal
+        title="Auto Import Settings"
+        open={settingsVisible}
+        onCancel={() => setSettingsVisible(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setSettingsVisible(false)}>
+            Cancel
+          </Button>,
+          <Button
+            key="save"
+            type="primary"
+            onClick={() => {
+              message.success('Settings saved successfully');
+              setSettingsVisible(false);
+            }}
+          >
+            Save Settings
+          </Button>
+        ]}
+        width={600}
+      >
+        <Form layout="vertical">
+          <Form.Item label="Scan Frequency">
+            <Select
+              value={cronPattern}
+              onChange={setCronPattern}
+              style={{ width: '100%' }}
+            >
+              {cronOptions.map(option => (
+                <Option key={option.value} value={option.value}>
+                  {option.label}
+                </Option>
+              ))}
+            </Select>
+            {cronPattern === 'custom' && (
+              <Input
+                placeholder="Enter custom cron pattern (e.g., 0 */2 * * *)"
+                style={{ marginTop: 8 }}
+                onChange={(e) => setCronPattern(e.target.value)}
+              />
+            )}
           </Form.Item>
 
-          <Alert
-            message={t('integrations.googleSheets.databaseOnlyInfo')}
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-          />
-
-          {loading && importProgress > 0 && (
-            <div style={{ marginBottom: 16 }}>
-              <Text>{t('integrations.googleSheets.processing')}</Text>
-              <Progress percent={importProgress} status="active" />
-            </div>
-          )}
+          <Form.Item label="File Name Patterns">
+            <Select
+              mode="tags"
+              style={{ width: '100%' }}
+              placeholder="Add file name patterns"
+              value={fileNamePatterns}
+              onChange={setFileNamePatterns}
+            >
+              {fileNamePatterns.map(pattern => (
+                <Option key={pattern} value={pattern}>
+                  {pattern}
+                </Option>
+              ))}
+            </Select>
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              Files containing these keywords will be automatically processed
+            </Text>
+          </Form.Item>
 
           <Form.Item>
-            <Space>
-              <Button type="primary" htmlType="submit" loading={loading}>
-                {t('integrations.googleSheets.startImport')}
-              </Button>
-              <Button onClick={() => setEcotrackImportModalVisible(false)}>
-                {t('common.cancel')}
-              </Button>
-            </Space>
+            <Alert
+              message="Auto Import Information"
+              description="The system will automatically scan your Google Drive for new order files and import them to your database. Make sure your Google account is properly connected and has access to the shop order files."
+              type="info"
+              showIcon
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -278,4 +593,4 @@ const GoogleSheets = () => {
   );
 };
 
-export default GoogleSheets;
+export default GoogleSheetsAutoImport;

@@ -306,7 +306,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Ensure page and limit are valid integers
     const validPage = Math.max(1, parseInt(page) || 1);
-    const validLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const validLimit = Math.min(10000, Math.max(1, parseInt(limit) || 20)); // Increased from 100 to 10000
     const offset = (validPage - 1) * validLimit;
     
     // Ensure they are integers for MySQL
@@ -386,7 +386,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const total = countResult[0].total;
 
-    // Get orders with user information
+    // Get orders with user information and source tracking fields
     const orderQuery = `
       SELECT 
         o.*,
@@ -595,7 +595,8 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
     // Restrict certain status transitions
     const statusTransitions = {
       'pending': ['confirmed', 'cancelled', 'on_hold', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent'],
-      'confirmed': ['processing', 'cancelled', 'on_hold', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent'],
+      'confirmed': ['import_to_delivery_company', 'processing', 'cancelled', 'on_hold', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent'],
+      'import_to_delivery_company': ['processing', 'cancelled', 'on_hold'],
       'processing': ['out_for_delivery', 'cancelled', 'on_hold', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent'],
       'out_for_delivery': ['delivered', 'returned', 'cancelled', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent'],
       'on_hold': ['pending', 'confirmed', 'cancelled', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent'],
@@ -694,16 +695,57 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
     updateFields.push('updated_at = NOW()');
     updateValues.push(orderId);
 
+    console.log(`🔍 MAIN ORDER UPDATE: About to update order ${orderId}`);
+    console.log(`🔍 Update fields:`, updateFields);
+    console.log(`🔍 Update values:`, updateValues);
+
     await pool.query(
       `UPDATE orders SET ${updateFields.join(', ')} WHERE id = ?`,
       updateValues
     );
 
-    // Integrate with Ecotrack when order is confirmed
+    console.log(`✅ MAIN ORDER UPDATE COMPLETED for order ${orderId}`);
+    console.log(`🔍 Order status before Ecotrack check - order.status: ${order.status}`);
+    console.log(`🔍 Updates being applied - updates.status: ${updates.status}`);
+
+    // Note: Automatic Ecotrack integration on 'confirmed' status has been disabled
+    // Orders now use batch processing via the /batch-ecotrack endpoint
+    // This allows staff to collect confirmed orders and send them in batches
+    
     if (updates.status === 'confirmed' && order.status !== 'confirmed') {
+      console.log(`� Order ${order.order_number} confirmed and ready for batch processing`);
+      
+      // Log confirmation without automatic Ecotrack sending
+      await pool.query(`
+        INSERT INTO tracking_logs (order_id, user_id, action, details, created_at)
+        VALUES (?, ?, ?, ?, NOW())
+      `, [
+        orderId,
+        req.user.id,
+        'order_confirmed',
+        `Order confirmed and ready for batch delivery processing`
+      ]);
+    }
+
+    // Integrate with Ecotrack when order status is "import_to_delivery_company"
+    console.log(`🔍 DEBUG: Checking Ecotrack integration conditions:`);
+    console.log(`  - updates.status: ${updates.status}`);
+    console.log(`  - order.status: ${order.status}`);
+    console.log(`  - Status condition met: ${updates.status === 'import_to_delivery_company' && order.status !== 'import_to_delivery_company'}`);
+    
+    if (updates.status === 'import_to_delivery_company' && order.status !== 'import_to_delivery_company') {
+      console.log(`🚚 ✅ ECOTRACK TRIGGER: Status changed to 'import_to_delivery_company' for order ${order.order_number || order.id}`);
+      
       try {
-        console.log(`🚚 Status changed from '${order.status}' to 'confirmed' for order ${order.order_number || order.id}`);
         console.log(`🚚 Creating Ecotrack shipment for order ${order.order_number}`);
+        console.log(`📋 Order details for Ecotrack:`, {
+          id: order.id,
+          order_number: order.order_number,
+          customer_name: order.customer_name,
+          customer_phone: order.customer_phone,
+          wilaya_id: order.wilaya_id,
+          baladia_id: order.baladia_id
+        });
         
         // Parse product details to extract more information
         let productInfo = {};
@@ -725,37 +767,55 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
           order_number: order.order_number,
           customer_name: order.customer_name,
           customer_phone: order.customer_phone,
-          customer_email: order.customer_email || '', // Add email if available
+          customer_phone_2: order.customer_phone_2,
           customer_address: order.customer_address,
           customer_city: order.customer_city,
           product_details: productInfo,
           total_amount: order.total_amount,
           notes: order.notes || '',
-          delivery_type: order.delivery_type || 'home'
+          delivery_type: order.delivery_type || 'home',
+          wilaya_id: order.wilaya_id,
+          baladia_name: order.baladia_name,
+          weight: order.weight || 1
         };
         
-        console.log(`📦 Ecotrack shipment data:`, shipmentData);
+        console.log(`📦 BEFORE ECOTRACK CALL: Shipment data:`, shipmentData);
+        console.log(`🌐 About to call ecotrackService.createShipment...`);
+        
         const trackingResult = await ecotrackService.createShipment(shipmentData);
-        console.log(`📦 Ecotrack response:`, trackingResult);
+        
+        console.log(`📦 AFTER ECOTRACK CALL: Response received:`, trackingResult);
+        console.log(`📦 Response type:`, typeof trackingResult);
+        console.log(`📦 Response success:`, trackingResult?.success);
+        console.log(`📦 Response tracking_id:`, trackingResult?.tracking_id);
 
         if (trackingResult.success) {
-          // Update order with Ecotrack tracking information
-          await pool.query(
-            `UPDATE orders SET 
-              ecotrack_tracking_id = ?, 
-              ecotrack_status = ?, 
-              ecotrack_last_update = NOW(),
-              tracking_url = ?
-            WHERE id = ?`,
-            [
-              trackingResult.tracking_id,
-              trackingResult.status,
-              trackingResult.tracking_url,
-              orderId
-            ]
-          );
-
-          console.log(`✅ Ecotrack shipment created: ${trackingResult.tracking_id}`);
+          try {
+            // Update order with Ecotrack tracking information and change status to processing
+            console.log(`💾 Saving tracking ID ${trackingResult.tracking_id} to database for order ${orderId}`);
+            
+            const updateResult = await pool.query(
+              `UPDATE orders SET 
+                ecotrack_tracking_id = ?, 
+                ecotrack_status = ?, 
+                ecotrack_last_update = NOW(),
+                tracking_url = ?
+              WHERE id = ?`,
+              [
+                trackingResult.tracking_id,
+                trackingResult.status,
+                trackingResult.tracking_url,
+                orderId
+              ]
+            );
+            
+            console.log(`✅ Database update result:`, updateResult[0]);
+            console.log(`✅ Ecotrack shipment created and saved: ${trackingResult.tracking_id}`);
+            
+          } catch (dbError) {
+            console.error(`❌ Failed to save tracking ID to database:`, dbError);
+            throw dbError; // Re-throw to be caught by outer catch
+          }
           
           // Log Ecotrack integration
           await pool.query(`
@@ -769,6 +829,10 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
           ]);
         }
       } catch (ecotrackError) {
+        console.error(`🚨 ECOTRACK ERROR CAUGHT:`, ecotrackError);
+        console.error(`🚨 Error type:`, typeof ecotrackError);
+        console.error(`🚨 Error message:`, ecotrackError.message);
+        console.error(`🚨 Error stack:`, ecotrackError.stack);
         console.error('Ecotrack integration error:', ecotrackError.message);
         // Log the error but don't fail the order update
         await pool.query(`
@@ -779,6 +843,65 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
           req.user.id,
           'ecotrack_error',
           `Failed to create Ecotrack shipment: ${ecotrackError.message}`
+        ]);
+      }
+    }
+
+    // Cancel Ecotrack shipment when order is cancelled
+    if (updates.status === 'cancelled' && order.status !== 'cancelled') {
+      try {
+        // Check if order has Ecotrack tracking ID
+        if (order.ecotrack_tracking_id) {
+          console.log(`🚚 ❌ ECOTRACK CANCELLATION: Cancelling shipment for order ${order.order_number}`);
+          console.log(`🚚 Tracking ID to cancel: ${order.ecotrack_tracking_id}`);
+          
+          const cancellationResult = await ecotrackService.cancelShipment(
+            order.ecotrack_tracking_id, 
+            `Order ${order.order_number} cancelled by user`
+          );
+          
+          if (cancellationResult.success) {
+            // Update order to remove Ecotrack information
+            await pool.query(
+              `UPDATE orders SET 
+                ecotrack_tracking_id = NULL, 
+                ecotrack_status = 'cancelled', 
+                ecotrack_last_update = NOW(),
+                tracking_url = NULL
+              WHERE id = ?`,
+              [orderId]
+            );
+
+            console.log(`✅ Ecotrack shipment cancelled: ${order.ecotrack_tracking_id}`);
+            
+            // Log Ecotrack cancellation
+            await pool.query(`
+              INSERT INTO tracking_logs (order_id, user_id, action, details, created_at)
+              VALUES (?, ?, ?, ?, NOW())
+            `, [
+              orderId,
+              req.user.id,
+              'ecotrack_cancelled',
+              `Ecotrack shipment cancelled - Tracking ID: ${order.ecotrack_tracking_id}`
+            ]);
+          } else {
+            console.error(`❌ Failed to cancel Ecotrack shipment for ${order.order_number}`);
+          }
+        } else {
+          console.log(`ℹ️ Order ${order.order_number} cancelled but has no Ecotrack tracking ID`);
+        }
+      } catch (ecotrackError) {
+        console.error(`🚨 Ecotrack cancellation error for ${order.order_number}:`, ecotrackError.message);
+        
+        // Log Ecotrack cancellation error
+        await pool.query(`
+          INSERT INTO tracking_logs (order_id, user_id, action, details, created_at)
+          VALUES (?, ?, ?, ?, NOW())
+        `, [
+          orderId,
+          req.user.id,
+          'ecotrack_cancellation_error',
+          `Failed to cancel Ecotrack shipment: ${ecotrackError.message}`
         ]);
       }
     }
@@ -1630,7 +1753,6 @@ router.post('/test-ecotrack', authenticateToken, requirePermission('canEditOrder
       order_number: `TEST-${Date.now()}`,
       customer_name: 'Test Customer',
       customer_phone: '0555123456',
-      customer_email: 'test@example.com',
       customer_address: 'Test Address',
       customer_city: 'Algiers',
       product_details: {
@@ -1657,6 +1779,211 @@ router.post('/test-ecotrack', authenticateToken, requirePermission('canEditOrder
     res.status(500).json({
       success: false,
       message: 'Ecotrack test failed',
+      error: error.message
+    });
+  }
+});
+
+// Batch send confirmed orders to Ecotrack delivery company
+router.post('/batch-ecotrack', authenticateToken, requirePermission('canEditOrders'), async (req, res) => {
+  try {
+    const { orderIds } = req.body;
+
+    // Validation
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order IDs array is required and must not be empty'
+      });
+    }
+
+    console.log(`📦 Starting batch Ecotrack processing for ${orderIds.length} orders`);
+
+    // Get confirmed orders that haven't been sent to Ecotrack yet
+    const placeholders = orderIds.map(() => '?').join(',');
+    const [orders] = await pool.query(
+      `SELECT 
+        o.id, o.order_number, o.customer_name, o.customer_phone, o.customer_phone_2,
+        o.customer_address, o.customer_city, o.product_details, o.weight,
+        o.total_amount, o.notes, o.delivery_type, o.status,
+        o.wilaya_id, o.baladia_id, o.ecotrack_tracking_id,
+        w.name_fr as wilaya_name, b.name_fr as baladia_name
+      FROM orders o
+      LEFT JOIN wilayas w ON o.wilaya_id = w.id
+      LEFT JOIN baladias b ON o.baladia_id = b.id
+      WHERE o.id IN (${placeholders}) 
+      AND o.status = 'confirmed'
+      AND (o.ecotrack_tracking_id IS NULL OR o.ecotrack_tracking_id = '')`,
+      orderIds
+    );
+
+    if (orders.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No eligible confirmed orders found. Orders must be confirmed and not already sent to delivery company.'
+      });
+    }
+
+    const results = [];
+    const successfulOrders = [];
+    const failedOrders = [];
+
+    // Process each order - change status to import_to_delivery_company AND integrate with Ecotrack
+    for (const order of orders) {
+      try {
+        console.log(`📦 Processing order ${order.order_number} for batch import to delivery company...`);
+
+        // Update order status to import_to_delivery_company
+        await pool.query(
+          `UPDATE orders SET 
+            status = 'import_to_delivery_company',
+            updated_at = NOW()
+          WHERE id = ?`,
+          [order.id]
+        );
+
+        // ECOTRACK INTEGRATION - Add the same logic as individual order update
+        console.log(`🚚 ✅ BATCH ECOTRACK: Creating shipment for order ${order.order_number}`);
+        
+        try {
+          // Parse product details
+          let productInfo = {};
+          if (order.product_details) {
+            try {
+              productInfo = typeof order.product_details === 'string' 
+                ? JSON.parse(order.product_details) 
+                : order.product_details;
+            } catch (e) {
+              productInfo = { name: order.product_details };
+            }
+          }
+
+          const shipmentData = {
+            order_number: order.order_number,
+            customer_name: order.customer_name,
+            customer_phone: order.customer_phone,
+            customer_phone_2: order.customer_phone_2,
+            customer_address: order.customer_address,
+            customer_city: order.customer_city,
+            product_details: productInfo,
+            total_amount: order.total_amount,
+            notes: order.notes || '',
+            delivery_type: order.delivery_type || 'home',
+            wilaya_id: order.wilaya_id,
+            baladia_name: order.baladia_name,
+            weight: order.weight || 1
+          };
+
+          console.log(`📦 BATCH: Calling Ecotrack API for order ${order.order_number}`);
+          const trackingResult = await ecotrackService.createShipment(shipmentData);
+          
+          if (trackingResult.success) {
+            // Save tracking information to database
+            await pool.query(
+              `UPDATE orders SET 
+                ecotrack_tracking_id = ?, 
+                ecotrack_status = ?, 
+                ecotrack_last_update = NOW(),
+                tracking_url = ?
+              WHERE id = ?`,
+              [
+                trackingResult.tracking_id,
+                trackingResult.status,
+                trackingResult.tracking_url,
+                order.id
+              ]
+            );
+
+            console.log(`✅ BATCH: Ecotrack shipment created: ${trackingResult.tracking_id}`);
+            
+            // Log Ecotrack integration
+            await pool.query(`
+              INSERT INTO tracking_logs (order_id, user_id, action, details, created_at)
+              VALUES (?, ?, ?, ?, NOW())
+            `, [
+              order.id,
+              req.user.id,
+              'ecotrack_created',
+              `Ecotrack shipment created with tracking ID: ${trackingResult.tracking_id}`
+            ]);
+          } else {
+            console.error(`❌ BATCH: Failed to create Ecotrack shipment for ${order.order_number}`);
+            
+            // Log Ecotrack failure
+            await pool.query(`
+              INSERT INTO tracking_logs (order_id, user_id, action, details, created_at)
+              VALUES (?, ?, ?, ?, NOW())
+            `, [
+              order.id,
+              req.user.id,
+              'ecotrack_error',
+              `Failed to create Ecotrack shipment: ${trackingResult.error || 'Unknown error'}`
+            ]);
+          }
+        } catch (ecotrackError) {
+          console.error(`🚨 BATCH: Ecotrack integration error for ${order.order_number}:`, ecotrackError.message);
+          
+          // Log Ecotrack error
+          await pool.query(`
+            INSERT INTO tracking_logs (order_id, user_id, action, details, created_at)
+            VALUES (?, ?, ?, ?, NOW())
+          `, [
+            order.id,
+            req.user.id,
+            'ecotrack_error',
+            `Ecotrack integration failed: ${ecotrackError.message}`
+          ]);
+        }
+
+        // Log batch status change
+        await pool.query(`
+          INSERT INTO tracking_logs (order_id, user_id, action, details, created_at)
+          VALUES (?, ?, ?, ?, NOW())
+        `, [
+          order.id,
+          req.user.id,
+          'batch_import_to_delivery',
+          `Order status changed to 'import_to_delivery_company' via batch processing`
+        ]);
+
+        successfulOrders.push({
+          orderId: order.id,
+          orderNumber: order.order_number,
+          status: 'import_to_delivery_company'
+        });
+
+        console.log(`✅ Success: ${order.order_number} -> import_to_delivery_company`);
+
+      } catch (error) {
+        console.error(`❌ Failed to process order ${order.order_number}:`, error);
+        failedOrders.push({
+          orderId: order.id,
+          orderNumber: order.order_number,
+          error: error.message
+        });
+      }
+    }
+
+    // Don't log batch operation with NULL order_id since tracking_logs requires a valid order_id
+    // Individual order status changes are already logged above
+
+    res.json({
+      success: true,
+      message: `Batch processing completed: ${successfulOrders.length}/${orders.length} orders successfully imported to delivery company`,
+      data: {
+        totalProcessed: orders.length,
+        successful: successfulOrders.length,
+        failed: failedOrders.length,
+        successfulOrders,
+        failedOrders
+      }
+    });
+
+  } catch (error) {
+    console.error('Batch Ecotrack error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during batch processing',
       error: error.message
     });
   }

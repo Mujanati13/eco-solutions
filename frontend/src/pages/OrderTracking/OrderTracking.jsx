@@ -41,7 +41,6 @@ import {
 } from "@ant-design/icons";
 import { orderService } from "../../services/orderService";
 import { useAuth } from "../../contexts/AuthContext";
-import "./OrderTracking.css";
 
 const { Title, Text, Link } = Typography;
 const { Option } = Select;
@@ -61,12 +60,13 @@ const OrderTracking = () => {
   const [allOrders, setAllOrders] = useState([]); // Store all orders for frontend filtering
   const [filteredOrders, setFilteredOrders] = useState([]); // Store filtered orders
   const [statusFilter, setStatusFilter] = useState("");
+  const [prevFilters, setPrevFilters] = useState({ searchText: "", statusFilter: "" }); // Track previous filters
   const [remarkModalVisible, setRemarkModalVisible] = useState(false);
   const [remarkContent, setRemarkContent] = useState("");
   const [addingRemark, setAddingRemark] = useState(false);
   const [pagination, setPagination] = useState({
     current: 1,
-    pageSize: 20,
+    pageSize: 50, // Increased from 20 to 50 to show more orders by default
     total: 0,
   });
 
@@ -106,12 +106,25 @@ const OrderTracking = () => {
 
     setFilteredOrders(filtered);
     
-    // Update pagination total based on filtered results
-    setPagination(prev => ({
-      ...prev,
-      total: filtered.length,
-      current: 1 // Reset to first page when filtering
-    }));
+    // Check if filters have actually changed
+    const filtersChanged = prevFilters.searchText !== searchText || prevFilters.statusFilter !== statusFilter;
+    
+    if (filtersChanged) {
+      // Only reset to page 1 when filters change
+      setPagination(prev => ({
+        ...prev,
+        total: filtered.length,
+        current: 1
+      }));
+      setPrevFilters({ searchText, statusFilter });
+    } else {
+      // Just update total without changing current page
+      setPagination(prev => ({
+        ...prev,
+        total: filtered.length,
+        current: prev.current > Math.ceil(filtered.length / prev.pageSize) ? 1 : prev.current
+      }));
+    }
   };
 
   const fetchOrders = async () => {
@@ -183,16 +196,15 @@ const OrderTracking = () => {
         return;
       }
 
-      // Call Ecotrack API to get latest status
-      const response = await fetch('https://app.noest-dz.com/api/public/get/trackings/info', {
+      // Call backend API instead of direct EcoTrack API
+      const response = await fetch('/api/ecotrack/tracking-info', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({
-          api_token: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
-          user_guid: '2QG0JDFP',
-          trackings: [order.ecotrack_tracking_id]
+          trackingIds: [order.ecotrack_tracking_id]
         })
       });
 
@@ -200,10 +212,10 @@ const OrderTracking = () => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
+      const result = await response.json();
       
-      if (data && data[order.ecotrack_tracking_id]) {
-        const trackingData = data[order.ecotrack_tracking_id];
+      if (result.success && result.data && result.data[order.ecotrack_tracking_id]) {
+        const trackingData = result.data[order.ecotrack_tracking_id];
         // Get the latest status from the activity array (first item is the latest)
         const ecotrackStatus = trackingData.activity && trackingData.activity.length > 0 
           ? trackingData.activity[0].event 
@@ -262,16 +274,15 @@ const OrderTracking = () => {
       // Get all tracking IDs
       const trackingIds = ordersWithTracking.map(order => order.ecotrack_tracking_id);
       
-      // Call Ecotrack API for bulk tracking
-      const response = await fetch('https://app.noest-dz.com/api/public/get/trackings/info', {
+      // Call backend API for bulk tracking instead of direct EcoTrack API
+      const response = await fetch('/api/ecotrack/tracking-info', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({
-          api_token: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
-          user_guid: '2QG0JDFP',
-          trackings: trackingIds
+          trackingIds: trackingIds
         })
       });
 
@@ -279,28 +290,30 @@ const OrderTracking = () => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
+      const result = await response.json();
       let updatedCount = 0;
       
-      // Process each order
-      for (const order of ordersWithTracking) {
-        if (data[order.ecotrack_tracking_id]) {
-          const trackingData = data[order.ecotrack_tracking_id];
-          const ecotrackStatus = trackingData.activity && trackingData.activity.length > 0 
-            ? trackingData.activity[0].event 
-            : 'unknown';
-          
-          const lastUpdate = new Date().toISOString().slice(0, 19).replace('T', ' ');
-          
-          try {
-            // Update the order in the database
-            await orderService.updateOrder(order.id, {
-              ecotrack_status: ecotrackStatus,
-              ecotrack_last_update: lastUpdate
-            });
-            updatedCount++;
-          } catch (error) {
-            console.error(`Failed to update order ${order.id}:`, error);
+      if (result.success && result.data) {
+        // Process each order
+        for (const order of ordersWithTracking) {
+          if (result.data[order.ecotrack_tracking_id]) {
+            const trackingData = result.data[order.ecotrack_tracking_id];
+            const ecotrackStatus = trackingData.activity && trackingData.activity.length > 0 
+              ? trackingData.activity[0].event 
+              : 'unknown';
+            
+            const lastUpdate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            
+            try {
+              // Update the order in the database
+              await orderService.updateOrder(order.id, {
+                ecotrack_status: ecotrackStatus,
+                ecotrack_last_update: lastUpdate
+              });
+              updatedCount++;
+            } catch (error) {
+              console.error(`Failed to update order ${order.id}:`, error);
+            }
           }
         }
       }
@@ -327,16 +340,15 @@ const OrderTracking = () => {
     try {
       setEcotrackLoading(true);
       
-      // Call the Ecotrack API directly using the same logic as ecotrackService
-      const response = await fetch('https://app.noest-dz.com/api/public/get/trackings/info', {
+      // Call backend API instead of direct EcoTrack API
+      const response = await fetch('/api/ecotrack/tracking-info', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({
-          api_token: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
-          user_guid: '2QG0JDFP',
-          trackings: [trackingId]
+          trackingIds: [trackingId]
         })
       });
 
@@ -344,20 +356,20 @@ const OrderTracking = () => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
-      console.log('Ecotrack API response:', data);
+      const result = await response.json();
+      console.log('Backend tracking API response:', result);
       console.log('Looking for tracking ID:', trackingId);
       
       // Process the response data
-      if (data && data[trackingId]) {
-        const trackingData = data[trackingId];
+      if (result.success && result.data && result.data[trackingId]) {
+        const trackingData = result.data[trackingId];
         console.log('Tracking data for', trackingId, ':', trackingData);
         console.log('OrderInfo:', trackingData.OrderInfo);
         console.log('Activity:', trackingData.activity);
         setEcotrackDetails(trackingData);
       } else {
         console.log('No tracking data found for', trackingId);
-        console.log('Available keys in response:', Object.keys(data || {}));
+        console.log('Available keys in response:', Object.keys(result.data || {}));
         message.warning(t("tracking.noTrackingData"));
       }
     } catch (error) {
@@ -390,38 +402,24 @@ const OrderTracking = () => {
     try {
       setAddingRemark(true);
       
-      // Use POST method as the API actually requires POST despite documentation showing GET
-      const requestBody = {
-        api_token: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
-        tracking: trackingId,
-        content: content.trim()
-      };
-
-      console.log('🔗 Adding remark to Ecotrack (POST):', 'https://app.noest-dz.com/api/public/add/maj');
-      console.log('📦 Request body:', requestBody);
-
-      const remarkResponse = await fetch('https://app.noest-dz.com/api/public/add/maj', {
+      // Call backend API instead of direct EcoTrack API
+      const response = await fetch('/api/ecotrack/add-remark', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify({
+          trackingId: trackingId,
+          content: content.trim()
+        })
       });
 
-      console.log('📡 Response status:', remarkResponse.status);
-      console.log('📡 Response headers:', remarkResponse.headers);
+      console.log('📡 Backend remark API response status:', response.status);
 
-      if (remarkResponse.ok) {
-        let result;
-        try {
-          result = await remarkResponse.json();
-        } catch (jsonError) {
-          // If response is not JSON, get text
-          result = await remarkResponse.text();
-        }
-        
-        console.log('✅ Successfully added remark to Ecotrack:', result);
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Successfully added remark via backend:', result);
         message.success(t("tracking.remarkAddedSuccess") || "Remark added successfully to Ecotrack");
         
         // Clear the remark content and close modal
@@ -435,19 +433,14 @@ const OrderTracking = () => {
           }, 1500); // Wait a bit longer for Ecotrack to process the update
         }
       } else {
-        let errorText;
-        try {
-          const errorJson = await remarkResponse.json();
-          errorText = errorJson.message || errorJson.error || `HTTP ${remarkResponse.status}`;
-        } catch {
-          errorText = await remarkResponse.text() || `HTTP ${remarkResponse.status}`;
-        }
+        const errorData = await response.json();
+        const errorText = errorData.message || errorData.error || `HTTP ${response.status}`;
         
-        console.warn('⚠️ Failed to add remark to Ecotrack:', errorText);
+        console.warn('⚠️ Failed to add remark via backend:', errorText);
         message.error(t("tracking.remarkAddFailed") || `Failed to add remark: ${errorText}`);
       }
     } catch (error) {
-      console.error('❌ Error adding remark to Ecotrack:', error);
+      console.error('❌ Error adding remark via backend:', error);
       message.error(t("tracking.remarkAddError") || `Network error: ${error.message}`);
     } finally {
       setAddingRemark(false);
@@ -949,15 +942,6 @@ const OrderTracking = () => {
     },
   ];
 
-  // Get paginated data from filtered orders
-  const getPaginatedOrders = () => {
-    const startIndex = (pagination.current - 1) * pagination.pageSize;
-    const endIndex = startIndex + pagination.pageSize;
-    return filteredOrders.slice(startIndex, endIndex);
-  };
-
-  const paginatedOrders = getPaginatedOrders();
-
   return (
     <div className="order-tracking-page">
       <div
@@ -1076,7 +1060,7 @@ const OrderTracking = () => {
       <Card>
         <Table
           columns={columns}
-          dataSource={paginatedOrders}
+          dataSource={filteredOrders} // Use full filtered data, let Table handle pagination
           rowKey="id"
           loading={loading}
           size="small"
@@ -1087,16 +1071,29 @@ const OrderTracking = () => {
             showSizeChanger: true,
             showQuickJumper: true,
             onChange: (page, pageSize) => {
-              setPagination({ ...pagination, current: page, pageSize });
+              console.log('📄 Pagination changed:', { page, pageSize });
+              setPagination(prev => ({ 
+                ...prev, 
+                current: page, 
+                pageSize: pageSize || prev.pageSize 
+              }));
+            },
+            onShowSizeChange: (current, size) => {
+              console.log('📏 Page size changed:', { current, size });
+              setPagination(prev => ({ 
+                ...prev, 
+                current: 1, // Reset to first page when changing page size
+                pageSize: size 
+              }));
             },
             showTotal: (total, range) => 
               `${range[0]}-${range[1]} of ${total} items${searchText ? ` (filtered from ${allOrders.length})` : ''}`,
-            pageSizeOptions: ['10', '20', '50', '100'],
+            pageSizeOptions: ['10', '20', '50', '100', '500', '1000'],
             responsive: true,
           }}
           scroll={{ 
-            x: 800, // Minimum width for horizontal scroll
-            y: window.innerHeight - 400 // Dynamic height based on screen
+            x: 800, // Only horizontal scroll for table width
+            // Removed y property to allow full height display
           }}
           tableLayout="fixed" // Fixed layout for better text overflow handling
         />
