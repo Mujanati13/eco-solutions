@@ -30,6 +30,8 @@ const googleAuthRoutes = require('./routes/googleAuth');
 const deliveryPricingRoutes = require('./routes/delivery-pricing');
 const orderProductRoutes = require('./routes/orderProduct');
 const ecotrackRoutes = require('./routes/ecotrack');
+const ecotrackMultiAccountRoutes = require('./routes/ecotrackMultiAccount');
+const boutiquesRoutes = require('./routes/boutiques');
 const autoImportRoutes = require('./routes/autoImport');
 
 const app = express();
@@ -89,6 +91,8 @@ app.use('/api/delivery-pricing', deliveryPricingRoutes);
 app.use('/api/order-product', orderProductRoutes);
 app.use('/api/auto-import', autoImportRoutes);
 app.use('/api/ecotrack', ecotrackRoutes);
+app.use('/api/ecotrack-multi-account', ecotrackMultiAccountRoutes);
+app.use('/api/boutiques', boutiquesRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -160,9 +164,9 @@ const startServer = async () => {
         const initialized = await autoImporter.initialize();
         
         if (initialized) {
-          // Start automatic scanning every 30 minutes by default
+          // Start automatic scanning every 5 minutes by default
           autoImporter.startAutomaticScanning('*/5 * * * *');
-          console.log('🤖 Auto Google Sheets importer started (every 30 minutes)');
+          console.log('🤖 Auto Google Sheets importer started (every 5 minutes)');
         } else {
           console.log('⚠️  Auto Google Sheets importer not started - admin user not found or not authenticated');
         }

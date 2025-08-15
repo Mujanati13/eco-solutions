@@ -11,6 +11,7 @@ class AutoGoogleSheetsImporter {
     this.isRunning = false;
     this.adminUserId = null; // Will be set to admin user ID
     this.processedFiles = new Set(); // Track processed files
+    this.fileNamePatterns = []; // Will be loaded from database
   }
 
   async initialize() {
@@ -62,6 +63,17 @@ class AutoGoogleSheetsImporter {
         )
       `);
 
+      // Create table to store file name patterns
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS auto_import_settings (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          setting_key VARCHAR(100) UNIQUE NOT NULL,
+          setting_value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_setting_key (setting_key)
+        )
+      `);
+
       // Create table to track individual orders and their source files
       await pool.query(`
         CREATE TABLE IF NOT EXISTS order_file_tracking (
@@ -86,15 +98,73 @@ class AutoGoogleSheetsImporter {
       const [processed] = await pool.query('SELECT spreadsheet_id FROM google_sheets_processed');
       this.processedFiles = new Set(processed.map(row => row.spreadsheet_id));
       
+      // Load file name patterns from database
+      await this.loadFileNamePatterns();
+      
       console.log(`📂 Loaded ${this.processedFiles.size} previously processed files`);
+      console.log(`🔍 Loaded ${this.fileNamePatterns.length} file name patterns`);
     } catch (error) {
       console.error('❌ Failed to load processed files:', error);
     }
   }
 
   /**
-   * Generate file hash for duplicate detection
+   * Load file name patterns from database
    */
+  async loadFileNamePatterns() {
+    try {
+      const [result] = await pool.query(
+        'SELECT setting_value FROM auto_import_settings WHERE setting_key = ?',
+        ['file_name_patterns']
+      );
+      
+      if (result.length > 0 && result[0].setting_value) {
+        this.fileNamePatterns = JSON.parse(result[0].setting_value);
+      } else {
+        // Set default patterns if none exist
+        this.fileNamePatterns = [
+          'order', 'commande', 'cmd', 'livraison', 'delivery', 'client', 'vente', 'boutique'
+        ];
+        await this.saveFileNamePatterns(this.fileNamePatterns);
+      }
+    } catch (error) {
+      console.error('❌ Error loading file name patterns:', error);
+      // Use default patterns on error
+      this.fileNamePatterns = [
+        'order', 'commande', 'cmd', 'livraison', 'delivery', 'client', 'vente', 'boutique'
+      ];
+    }
+  }
+
+  /**
+   * Save file name patterns to database
+   */
+  async saveFileNamePatterns(patterns) {
+    try {
+      await pool.query(`
+        INSERT INTO auto_import_settings (setting_key, setting_value)
+        VALUES ('file_name_patterns', ?)
+        ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+      `, [JSON.stringify(patterns)]);
+      
+      this.fileNamePatterns = patterns;
+      console.log('✅ File name patterns saved:', patterns);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error saving file name patterns:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get current file name patterns
+   */
+  async getFileNamePatterns() {
+    return {
+      success: true,
+      patterns: this.fileNamePatterns
+    };
+  }
   async generateFileHash(fileContent) {
     try {
       const hash = crypto.createHash('sha256');
@@ -422,24 +492,27 @@ class AutoGoogleSheetsImporter {
   }
 
   shouldProcessFile(fileName) {
-    // Define patterns that indicate this is an order file
-    const orderFilePatterns = [
-      /order/i,
-      /commande/i,
-      /cmd/i,
-      /livraison/i,
-      /delivery/i,
-      /client/i,
-      /vente/i,
-      /sale/i,
-      /boutique/i,
-      /shop/i,
-      // Add your shop's specific naming patterns here
-      /^\d{4}-\d{2}-\d{2}/, // Date format like 2025-08-08
-      /^CMD\d+/i, // Command reference format
-    ];
+    // Use patterns loaded from database
+    if (!this.fileNamePatterns || this.fileNamePatterns.length === 0) {
+      console.warn('⚠️ No file name patterns loaded, using default check');
+      // Fallback to basic pattern check
+      const defaultPatterns = ['order', 'commande', 'cmd', 'livraison', 'delivery', 'client', 'vente', 'boutique'];
+      return defaultPatterns.some(pattern => fileName.toLowerCase().includes(pattern.toLowerCase()));
+    }
 
-    return orderFilePatterns.some(pattern => pattern.test(fileName));
+    // Check if filename contains any of the configured patterns
+    const shouldProcess = this.fileNamePatterns.some(pattern => {
+      const regex = new RegExp(pattern, 'i'); // Case-insensitive
+      return regex.test(fileName);
+    });
+
+    if (shouldProcess) {
+      console.log(`✅ File "${fileName}" matches pattern, will process`);
+    } else {
+      console.log(`⏭️ File "${fileName}" doesn't match any patterns [${this.fileNamePatterns.join(', ')}], skipping`);
+    }
+
+    return shouldProcess;
   }
 
   async isFileNewOrModified(spreadsheetId, modifiedTime, fileContent = null) {

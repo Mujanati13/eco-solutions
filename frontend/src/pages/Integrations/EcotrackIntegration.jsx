@@ -13,6 +13,7 @@ import {
   Space,
   Switch,
   Tooltip,
+  Tabs,
 } from 'antd';
 import {
   SettingOutlined,
@@ -22,13 +23,17 @@ import {
   UserOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
+  ShopOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { ecotrackService } from '../../services/ecotrackService';
 import { configService } from '../../services/configService';
+import EcotrackMultiAccount from './EcotrackMultiAccount';
 import './EcotrackIntegration.css';
 
 const { Title, Text, Paragraph } = Typography;
+const { TabPane } = Tabs;
 
 const EcotrackIntegration = () => {
   const { t } = useTranslation();
@@ -270,254 +275,278 @@ const EcotrackIntegration = () => {
 
   return (
     <div className="ecotrack-integration">
-      <Row gutter={[24, 24]}>
-        <Col span={24}>
-          <Card 
-            title={
-              <Space>
-                <SettingOutlined />
-                {t('ecotrack.configuration')}
-              </Space>
-            }
-            extra={
-              <Space>
-                {configSaved && (
-                  <Text type="success">
-                    <CheckCircleOutlined /> {t('ecotrack.configurationSaved')}
-                  </Text>
-                )}
-              </Space>
-            }
-          >
-            <Alert
-              message={t('ecotrack.configurationInfo')}
-              description={
-                <div>
-                  <p>{t('ecotrack.configurationDescription')}</p>
-                  <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
-                    <li><strong>API Token:</strong> {t('ecotrack.apiTokenDescription')}</li>
-                    <li><strong>User GUID:</strong> {t('ecotrack.userGuidDescription')}</li>
-                  </ul>
-                  <p>{t('ecotrack.configurationNote')}</p>
-                </div>
-              }
-              type="info"
-              showIcon
-              style={{ marginBottom: 24 }}
-            />
-
-            <Form
-              form={form}
-              layout="vertical"
-              onFinish={handleSaveConfiguration}
-              initialValues={{
-                isEnabled: false
-              }}
-            >
-              <Row gutter={[16, 0]}>
-                <Col xs={24} lg={12}>
-                  <Form.Item
-                    label={
-                      <Space>
-                        <KeyOutlined />
-                        {t('ecotrack.apiToken')}
-                      </Space>
-                    }
-                    name="apiToken"
-                    rules={[
-                      { required: true, message: t('ecotrack.apiTokenRequired') },
-                      { min: 10, message: t('ecotrack.apiTokenLength') }
-                    ]}
-                  >
-                    <Input.Password 
-                      placeholder={t('ecotrack.apiTokenPlaceholder')}
-                      size="large"
-                    />
-                  </Form.Item>
-                </Col>
-
-                <Col xs={24} lg={12}>
-                  <Form.Item
-                    label={
-                      <Space>
-                        <UserOutlined />
-                        {t('ecotrack.userGuid')}
-                        {config.userGuid && (
-                          <Text type="secondary" style={{ fontSize: '12px' }}>
-                            (Current: {config.userGuid} - {config.userGuid.length} chars)
-                          </Text>
-                        )}
-                      </Space>
-                    }
-                    name="userGuid"
-                    rules={[
-                      { required: true, message: t('ecotrack.userGuidRequired') }
-                    ]}
-                  >
-                    <Input 
-                      placeholder="2QG0JDFPf"
-                      size="large"
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (value && value.length > 0) {
-                          console.log(`GUID input: "${value}" (${value.length} characters)`);
-                        }
-                      }}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Form.Item
-                label={t('ecotrack.enableIntegration')}
-                name="isEnabled"
-                valuePropName="checked"
+      <Tabs defaultActiveKey="single" type="card" size="large">
+        <TabPane 
+          tab={
+            <Space>
+              <GlobalOutlined />
+              Single Account (Legacy)
+            </Space>
+          } 
+          key="single"
+        >
+          <Row gutter={[24, 24]}>
+            <Col span={24}>
+              <Card 
+                title={
+                  <Space>
+                    <SettingOutlined />
+                    {t('ecotrack.configuration')}
+                  </Space>
+                }
+                extra={
+                  <Space>
+                    {configSaved && (
+                      <Text type="success">
+                        <CheckCircleOutlined /> {t('ecotrack.configurationSaved')}
+                      </Text>
+                    )}
+                  </Space>
+                }
               >
-                <Switch 
-                  checkedChildren={t('common.enabled')}
-                  unCheckedChildren={t('common.disabled')}
-                />
-              </Form.Item>
-
-              <Divider />
-
-              {/* Connection Status */}
-              {connectionStatus && (
                 <Alert
-                  message={connectionStatus.success ? t('ecotrack.connectionSuccess') : t('ecotrack.connectionError')}
-                  description={connectionStatus.message}
-                  type={connectionStatus.success ? 'success' : 'error'}
+                  message="Legacy Single Account Configuration"
+                  description={
+                    <div>
+                      <p>This is the original single-account configuration. It's recommended to use the Multi-Account setup for better organization.</p>
+                      <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
+                        <li><strong>API Token:</strong> {t('ecotrack.apiTokenDescription')}</li>
+                        <li><strong>User GUID:</strong> {t('ecotrack.userGuidDescription')}</li>
+                      </ul>
+                      <p style={{ color: '#1890ff', fontWeight: 'bold' }}>💡 Switch to "Multi-Account" tab for location-based EcoTrack accounts!</p>
+                    </div>
+                  }
+                  type="info"
                   showIcon
-                  style={{ marginBottom: 16 }}
+                  style={{ marginBottom: 24 }}
                 />
-              )}
 
-              <Space size="large">
-                <Button 
-                  type="primary"
-                  htmlType="submit"
-                  loading={loading}
-                  icon={<SaveOutlined />}
-                  size="large"
+                <Form
+                  form={form}
+                  layout="vertical"
+                  onFinish={handleSaveConfiguration}
+                  initialValues={{
+                    isEnabled: false
+                  }}
                 >
-                  {t('ecotrack.saveConfiguration')}
-                </Button>
+                  <Row gutter={[16, 0]}>
+                    <Col xs={24} lg={12}>
+                      <Form.Item
+                        label={
+                          <Space>
+                            <KeyOutlined />
+                            {t('ecotrack.apiToken')}
+                          </Space>
+                        }
+                        name="apiToken"
+                        rules={[
+                          { required: true, message: t('ecotrack.apiTokenRequired') },
+                          { min: 10, message: t('ecotrack.apiTokenLength') }
+                        ]}
+                      >
+                        <Input.Password 
+                          placeholder={t('ecotrack.apiTokenPlaceholder')}
+                          size="large"
+                        />
+                      </Form.Item>
+                    </Col>
 
-              </Space>
-            </Form>
-          </Card>
-        </Col>
+                    <Col xs={24} lg={12}>
+                      <Form.Item
+                        label={
+                          <Space>
+                            <UserOutlined />
+                            {t('ecotrack.userGuid')}
+                            {config.userGuid && (
+                              <Text type="secondary" style={{ fontSize: '12px' }}>
+                                (Current: {config.userGuid} - {config.userGuid.length} chars)
+                              </Text>
+                            )}
+                          </Space>
+                        }
+                        name="userGuid"
+                        rules={[
+                          { required: true, message: t('ecotrack.userGuidRequired') }
+                        ]}
+                      >
+                        <Input 
+                          placeholder="2QG0JDFPf"
+                          size="large"
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            if (value && value.length > 0) {
+                              console.log(`GUID input: "${value}" (${value.length} characters)`);
+                            }
+                          }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
 
-        {/* Configuration Status Card */}
-        <Col span={24}>
-          <Card title={t('ecotrack.integrationStatus')} size="small">
-            <Row gutter={[16, 16]}>
-              <Col xs={24} sm={8}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', marginBottom: '8px' }}>
-                    {config.apiToken ? (
-                      <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                    ) : (
-                      <ExclamationCircleOutlined style={{ color: '#faad14' }} />
-                    )}
-                  </div>
-                  <Text strong>{t('ecotrack.apiToken')}</Text>
-                  <div>
-                    <Text type={config.apiToken ? 'success' : 'secondary'}>
-                      {config.apiToken ? t('ecotrack.configured') : t('ecotrack.notConfigured')}
+                  <Form.Item
+                    label={t('ecotrack.enableIntegration')}
+                    name="isEnabled"
+                    valuePropName="checked"
+                  >
+                    <Switch 
+                      checkedChildren={t('common.enabled')}
+                      unCheckedChildren={t('common.disabled')}
+                    />
+                  </Form.Item>
+
+                  <Divider />
+
+                  {/* Connection Status */}
+                  {connectionStatus && (
+                    <Alert
+                      message={connectionStatus.success ? t('ecotrack.connectionSuccess') : t('ecotrack.connectionError')}
+                      description={connectionStatus.message}
+                      type={connectionStatus.success ? 'success' : 'error'}
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                    />
+                  )}
+
+                  <Space size="large">
+                    <Button 
+                      type="primary"
+                      htmlType="submit"
+                      loading={loading}
+                      icon={<SaveOutlined />}
+                      size="large"
+                    >
+                      {t('ecotrack.saveConfiguration')}
+                    </Button>
+
+                  </Space>
+                </Form>
+              </Card>
+            </Col>
+
+            {/* Configuration Status Card */}
+            <Col span={24}>
+              <Card title={t('ecotrack.integrationStatus')} size="small">
+                <Row gutter={[16, 16]}>
+                  <Col xs={24} sm={8}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '24px', marginBottom: '8px' }}>
+                        {config.apiToken ? (
+                          <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                        ) : (
+                          <ExclamationCircleOutlined style={{ color: '#faad14' }} />
+                        )}
+                      </div>
+                      <Text strong>{t('ecotrack.apiToken')}</Text>
+                      <div>
+                        <Text type={config.apiToken ? 'success' : 'secondary'}>
+                          {config.apiToken ? t('ecotrack.configured') : t('ecotrack.notConfigured')}
+                        </Text>
+                      </div>
+                    </div>
+                  </Col>
+
+                  <Col xs={24} sm={8}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '24px', marginBottom: '8px' }}>
+                        {config.userGuid ? (
+                          <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                        ) : (
+                          <ExclamationCircleOutlined style={{ color: '#faad14' }} />
+                        )}
+                      </div>
+                      <Text strong>{t('ecotrack.userGuid')}</Text>
+                      <div>
+                        <Text type={config.userGuid ? 'success' : 'secondary'}>
+                          {config.userGuid ? (
+                            <>
+                              {config.userGuid} ({config.userGuid.length} chars)
+                            </>
+                          ) : t('ecotrack.notConfigured')}
+                        </Text>
+                      </div>
+                    </div>
+                  </Col>
+
+                  <Col xs={24} sm={8}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '24px', marginBottom: '8px' }}>
+                        {config.isEnabled ? (
+                          <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                        ) : (
+                          <ExclamationCircleOutlined style={{ color: '#faad14' }} />
+                        )}
+                      </div>
+                      <Text strong>{t('ecotrack.integration')}</Text>
+                      <div>
+                        <Text type={config.isEnabled ? 'success' : 'secondary'}>
+                          {config.isEnabled ? t('common.enabled') : t('common.disabled')}
+                        </Text>
+                      </div>
+                    </div>
+                  </Col>
+                </Row>
+              </Card>
+            </Col>
+
+            {/* Debug/Testing Section - Development Only */}
+            {process.env.NODE_ENV === 'development' && (
+              <Col span={24}>
+                <Card title="🛠️ Debug & Testing" size="small" style={{ border: '1px dashed #d9d9d9' }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Text type="secondary">
+                      Test GUID length handling with different values:
                     </Text>
-                  </div>
-                </div>
-              </Col>
-
-              <Col xs={24} sm={8}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', marginBottom: '8px' }}>
-                    {config.userGuid ? (
-                      <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                    ) : (
-                      <ExclamationCircleOutlined style={{ color: '#faad14' }} />
-                    )}
-                  </div>
-                  <Text strong>{t('ecotrack.userGuid')}</Text>
-                  <div>
-                    <Text type={config.userGuid ? 'success' : 'secondary'}>
-                      {config.userGuid ? (
-                        <>
-                          {config.userGuid} ({config.userGuid.length} chars)
-                        </>
-                      ) : t('ecotrack.notConfigured')}
+                    <Space wrap>
+                      <Button 
+                        size="small" 
+                        onClick={() => window.testEcotrackGuidLength && window.testEcotrackGuidLength('2QG0JDFP')}
+                      >
+                        Test 8-char GUID
+                      </Button>
+                      <Button 
+                        size="small" 
+                        onClick={() => window.testEcotrackGuidLength && window.testEcotrackGuidLength('2QG0JDFPf')}
+                      >
+                        Test 9-char GUID
+                      </Button>
+                      <Button 
+                        size="small" 
+                        onClick={() => window.testEcotrackGuidLength && window.testEcotrackGuidLength('2QG0JDFPfull')}
+                      >
+                        Test 12-char GUID
+                      </Button>
+                      <Button 
+                        size="small" 
+                        onClick={() => {
+                          console.log('🔄 Reloading configuration...');
+                          loadConfiguration();
+                        }}
+                      >
+                        Reload Config
+                      </Button>
+                    </Space>
+                    <Text type="secondary" style={{ fontSize: '12px' }}>
+                      Check browser console for detailed test results. These tests help identify where GUID truncation occurs.
                     </Text>
-                  </div>
-                </div>
+                  </Space>
+                </Card>
               </Col>
+            )}
+          </Row>
+        </TabPane>
 
-              <Col xs={24} sm={8}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '24px', marginBottom: '8px' }}>
-                    {config.isEnabled ? (
-                      <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                    ) : (
-                      <ExclamationCircleOutlined style={{ color: '#faad14' }} />
-                    )}
-                  </div>
-                  <Text strong>{t('ecotrack.integration')}</Text>
-                  <div>
-                    <Text type={config.isEnabled ? 'success' : 'secondary'}>
-                      {config.isEnabled ? t('common.enabled') : t('common.disabled')}
-                    </Text>
-                  </div>
-                </div>
-              </Col>
-            </Row>
-          </Card>
-        </Col>
-
-        {/* Debug/Testing Section - Development Only */}
-        {process.env.NODE_ENV === 'development' && (
-          <Col span={24}>
-            <Card title="🛠️ Debug & Testing" size="small" style={{ border: '1px dashed #d9d9d9' }}>
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Text type="secondary">
-                  Test GUID length handling with different values:
-                </Text>
-                <Space wrap>
-                  <Button 
-                    size="small" 
-                    onClick={() => window.testEcotrackGuidLength && window.testEcotrackGuidLength('2QG0JDFP')}
-                  >
-                    Test 8-char GUID
-                  </Button>
-                  <Button 
-                    size="small" 
-                    onClick={() => window.testEcotrackGuidLength && window.testEcotrackGuidLength('2QG0JDFPf')}
-                  >
-                    Test 9-char GUID
-                  </Button>
-                  <Button 
-                    size="small" 
-                    onClick={() => window.testEcotrackGuidLength && window.testEcotrackGuidLength('2QG0JDFPfull')}
-                  >
-                    Test 12-char GUID
-                  </Button>
-                  <Button 
-                    size="small" 
-                    onClick={() => {
-                      console.log('🔄 Reloading configuration...');
-                      loadConfiguration();
-                    }}
-                  >
-                    Reload Config
-                  </Button>
-                </Space>
-                <Text type="secondary" style={{ fontSize: '12px' }}>
-                  Check browser console for detailed test results. These tests help identify where GUID truncation occurs.
-                </Text>
-              </Space>
-            </Card>
-          </Col>
-        )}
-      </Row>
+        <TabPane 
+          tab={
+            <Space>
+              <ShopOutlined />
+              Multi-Account (Recommended)
+            </Space>
+          } 
+          key="multi"
+        >
+          <EcotrackMultiAccount />
+        </TabPane>
+      </Tabs>
     </div>
   );
 };

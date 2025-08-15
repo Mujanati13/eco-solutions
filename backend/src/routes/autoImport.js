@@ -141,6 +141,43 @@ router.get('/order-source/:orderNumber', authenticateToken, ensureInitialized, a
   }
 });
 
+// Get file name patterns
+router.get('/file-patterns', authenticateToken, requireAdmin, ensureInitialized, async (req, res) => {
+  try {
+    const result = await autoImporter.getFileNamePatterns();
+    res.json(result);
+  } catch (error) {
+    console.error('Get file patterns error:', error);
+    res.status(500).json({ error: 'Failed to get file name patterns' });
+  }
+});
+
+// Save file name patterns
+router.post('/file-patterns', authenticateToken, requireAdmin, ensureInitialized, async (req, res) => {
+  try {
+    const { patterns } = req.body;
+    
+    if (!Array.isArray(patterns)) {
+      return res.status(400).json({ error: 'Patterns must be an array' });
+    }
+    
+    const result = await autoImporter.saveFileNamePatterns(patterns);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'File name patterns saved successfully',
+        patterns
+      });
+    } else {
+      res.status(500).json({ error: result.error });
+    }
+  } catch (error) {
+    console.error('Save file patterns error:', error);
+    res.status(500).json({ error: 'Failed to save file name patterns' });
+  }
+});
+
 // Get all orders from a specific file
 router.get('/file-orders/:spreadsheetId', authenticateToken, ensureInitialized, async (req, res) => {
   try {

@@ -80,6 +80,244 @@ class EcotrackService {
   }
 
   /**
+   * Get the appropriate EcoTrack account for an order based on its location
+   * Simple logic: 
+   * 1. If order has location → use location-specific account
+   * 2. If no location → look at products in order to find location
+   * 3. If still no location → use default account
+   * @param {Object} orderData - Order data containing location information
+   * @returns {Promise<Object>} - { account, source } where source indicates how account was selected
+   */
+  async getAccountForOrder(orderData) {
+    try {
+      console.log('🏪 Selecting EcoTrack account for order:', {
+        order_id: orderData.id,
+        order_number: orderData.order_number,
+        location_id: orderData.location_id,
+        boutique_id: orderData.boutique_id,
+        stock_location_id: orderData.stock_location_id
+      });
+
+      // Step 1: Check if order has a direct location
+      let locationId = orderData.location_id || orderData.boutique_id || orderData.stock_location_id;
+      
+      if (locationId) {
+        console.log(`🔍 Order has direct location_id: ${locationId} - Looking for location-specific account`);
+        
+        const account = await this.getAccountByLocation(locationId);
+        if (account) {
+          return {
+            account,
+            source: 'order_location',
+            selection_method: `order_location_id:${locationId}`
+          };
+        } else {
+          console.log(`⚠️ No EcoTrack account found for order location_id: ${locationId}`);
+        }
+      }
+
+      // Step 2: If no direct location, extract product name from order and match to products table
+      if (!locationId && orderData.product_details) {
+        console.log('🔍 No direct location found, extracting product info from order...');
+        
+        try {
+          let productDetails;
+          if (typeof orderData.product_details === 'string') {
+            productDetails = JSON.parse(orderData.product_details);
+          } else {
+            productDetails = orderData.product_details;
+          }
+          
+          if (productDetails && productDetails.name) {
+            const productName = productDetails.name.trim();
+            console.log(`🎯 Looking for product in database: "${productName}"`);
+            
+            // Search for matching product in database using similar logic to frontend
+            const [matchedProducts] = await pool.query(`
+              SELECT p.id, p.name, p.location_id, sl.name as location_name
+              FROM products p
+              LEFT JOIN stock_locations sl ON p.location_id = sl.id
+              WHERE p.location_id IS NOT NULL
+              AND (
+                LOWER(p.name) = LOWER(?) OR
+                LOWER(p.name) LIKE LOWER(?) OR
+                LOWER(?) LIKE LOWER(CONCAT('%', p.name, '%'))
+              )
+              ORDER BY 
+                CASE 
+                  WHEN LOWER(p.name) = LOWER(?) THEN 1
+                  WHEN LOWER(p.name) LIKE LOWER(?) THEN 2
+                  ELSE 3
+                END
+              LIMIT 1
+            `, [productName, `%${productName}%`, productName, productName, `%${productName}%`]);
+            
+            if (matchedProducts.length > 0) {
+              const matchedProduct = matchedProducts[0];
+              locationId = matchedProduct.location_id;
+              
+              console.log(`🎯 Matched product "${productName}" to database product:`, {
+                product_id: matchedProduct.id,
+                product_name: matchedProduct.name,
+                location_id: matchedProduct.location_id,
+                location_name: matchedProduct.location_name
+              });
+              
+              const account = await this.getAccountByLocation(locationId);
+              if (account) {
+                return {
+                  account,
+                  source: 'product_name_match',
+                  selection_method: `product_name_match:${matchedProduct.name}->location_id:${locationId}`
+                };
+              } else {
+                console.log(`⚠️ No EcoTrack account found for matched product location_id: ${locationId}`);
+              }
+            } else {
+              console.log(`📍 No matching product found in database for: "${productName}"`);
+            }
+          } else {
+            console.log('📍 No product name found in product_details');
+          }
+        } catch (error) {
+          console.log('⚠️ Error parsing product_details or matching product:', error.message);
+        }
+      }
+
+      // Step 3: Use default EcoTrack account (when no location found)
+      console.log('🔄 No location found, using default EcoTrack account...');
+      
+      const defaultAccount = await this.getDefaultAccount();
+      if (defaultAccount) {
+        return {
+          account: defaultAccount,
+          source: 'default_account',
+          selection_method: 'is_default=1'
+        };
+      }
+
+      // Step 4: Final fallback to global config (backward compatibility)
+      console.log('⚠️ No default account found, falling back to global config...');
+      await this.ensureConfigLoaded();
+      
+      if (this.apiToken && this.userGuid) {
+        return {
+          account: {
+            id: null,
+            name: 'Global Configuration',
+            api_token: this.apiToken,
+            user_guid: this.userGuid,
+            location_id: null,
+            location_name: 'Global',
+            location_code: 'GLOBAL'
+          },
+          source: 'global_config',
+          selection_method: 'ecotrack_config_table'
+        };
+      }
+
+      throw new Error('No EcoTrack account configuration found');
+      
+    } catch (error) {
+      console.error('❌ Error selecting EcoTrack account:', error);
+      throw new Error(`Failed to select EcoTrack account: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get EcoTrack account by location ID
+   * @param {number} locationId - Location ID
+   * @returns {Promise<Object|null>} - Account object or null if not found
+   */
+  async getAccountByLocation(locationId) {
+    try {
+      const [accounts] = await pool.query(`
+        SELECT 
+          ea.*,
+          sl.name as location_name,
+          sl.code as location_code
+        FROM ecotrack_accounts ea
+        JOIN stock_locations sl ON ea.location_id = sl.id
+        WHERE ea.location_id = ? AND ea.is_enabled = 1
+        ORDER BY ea.updated_at DESC
+        LIMIT 1
+      `, [locationId]);
+      
+      if (accounts.length > 0) {
+        const account = accounts[0];
+        console.log('✅ Found EcoTrack account for location:', {
+          account_id: account.id,
+          account_name: account.account_name,
+          location_name: account.location_name,
+          api_token: '***' + account.api_token.slice(-4),
+          user_guid: account.user_guid
+        });
+        
+        return {
+          id: account.id,
+          name: account.account_name,
+          api_token: account.api_token,
+          user_guid: account.user_guid,
+          location_id: account.location_id,
+          location_name: account.location_name,
+          location_code: account.location_code
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error getting account by location:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get default EcoTrack account
+   * @returns {Promise<Object|null>} - Default account object or null if not found
+   */
+  async getDefaultAccount() {
+    try {
+      const [defaultAccounts] = await pool.query(`
+        SELECT 
+          ea.*,
+          sl.name as location_name,
+          sl.code as location_code
+        FROM ecotrack_accounts ea
+        JOIN stock_locations sl ON ea.location_id = sl.id
+        WHERE ea.is_enabled = 1 AND ea.is_default = 1
+        ORDER BY ea.updated_at DESC
+        LIMIT 1
+      `);
+      
+      if (defaultAccounts.length > 0) {
+        const account = defaultAccounts[0];
+        console.log('✅ Found default EcoTrack account:', {
+          account_id: account.id,
+          account_name: account.account_name,
+          location_name: account.location_name,
+          api_token: '***' + account.api_token.slice(-4),
+          user_guid: account.user_guid
+        });
+        
+        return {
+          id: account.id,
+          name: account.account_name,
+          api_token: account.api_token,
+          user_guid: account.user_guid,
+          location_id: account.location_id,
+          location_name: account.location_name,
+          location_code: account.location_code
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error getting default account:', error);
+      return null;
+    }
+  }
+
+  /**
    * Update axios client with current credentials
    */
   updateAxiosClient() {
@@ -220,16 +458,28 @@ class EcotrackService {
    * @returns {Promise<Object>} - Tracking information
    */
   async createShipment(orderData) {
-    // Ensure configuration is loaded from database
-    await this.ensureConfigLoaded();
-    
     console.log(`🚚 🔴 EcotrackService.createShipment CALLED!`);
     console.log(`🚚 EcotrackService.createShipment called with:`, orderData);
     console.log(`🚚 Function entry timestamp:`, new Date().toISOString());
     
-    if (!this.validateCredentials()) {
-      console.error(`❌ Missing Ecotrack credentials`);
-      throw new Error('Missing required Ecotrack credentials');
+    // Step 1: Select the appropriate EcoTrack account for this order
+    const accountSelection = await this.getAccountForOrder(orderData);
+    const selectedAccount = accountSelection.account;
+    
+    console.log(`🏪 Selected EcoTrack account:`, {
+      account_id: selectedAccount.id,
+      account_name: selectedAccount.name,
+      location: selectedAccount.location_name,
+      source: accountSelection.source,
+      method: accountSelection.selection_method,
+      api_token: '***' + selectedAccount.api_token.slice(-4),
+      user_guid: selectedAccount.user_guid
+    });
+    
+    // Step 2: Validate selected account credentials
+    if (!selectedAccount.api_token || !selectedAccount.user_guid) {
+      console.error(`❌ Selected account missing credentials`);
+      throw new Error(`Selected EcoTrack account "${selectedAccount.name}" is missing required credentials`);
     }
 
     try {
@@ -315,8 +565,8 @@ class EcotrackService {
       console.log(`  - Original commune from order: "${orderData.commune}"`);
       
       const ecotrackOrderData = {
-        api_token: this.apiToken, // Required - from documentation
-        user_guid: this.userGuid, // Required
+        api_token: selectedAccount.api_token, // Required - from selected account
+        user_guid: selectedAccount.user_guid, // Required - from selected account
         reference: orderData.order_number || `REF-${Date.now()}`, // Nullable | max:255
         client: orderData.customer_name || 'Customer', // Required | max:255
         phone: (orderData.customer_phone?.replace(/\D/g, '') || '0555123456').substring(0, 10), // Required | digits between 9,10
@@ -364,8 +614,8 @@ class EcotrackService {
           createResponse = await axios.post('https://app.noest-dz.com/api/public/create/order', ecotrackOrderData, {
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${this.apiToken}`,
-              'partner-id': this.userGuid
+              'Authorization': `Bearer ${selectedAccount.api_token}`,
+              'partner-id': selectedAccount.user_guid
             },
             timeout: 30000
           });
@@ -430,7 +680,19 @@ class EcotrackService {
         success: true,
         tracking_id: trackingId,
         status: 'created', // Initial status
-        tracking_url: `https://app.noest-dz.com/tracking/${trackingId}`
+        tracking_url: `https://app.noest-dz.com/tracking/${trackingId}`,
+        // Account usage information
+        account_used: {
+          id: selectedAccount.id,
+          name: selectedAccount.name,
+          location_id: selectedAccount.location_id,
+          location_name: selectedAccount.location_name,
+          location_code: selectedAccount.location_code,
+          selection_source: accountSelection.source,
+          selection_method: accountSelection.selection_method,
+          api_token_suffix: selectedAccount.api_token.slice(-4),
+          user_guid: selectedAccount.user_guid
+        }
       };
     } catch (error) {
       console.error('🚨 Ecotrack API Error Details:');
@@ -449,18 +711,25 @@ class EcotrackService {
   /**
    * Get tracking information for orders
    * @param {Array<string>} trackingIds - Array of Ecotrack tracking IDs
-   * @returns {Promise<Object>} - Tracking information
+   * @param {Object} orderData - Optional order data to help select account
+   * @returns {Promise<Object>} - Tracking information with account usage
    */
-  async getTrackingInfo(trackingIds) {
-    // Ensure configuration is loaded from database
-    await this.ensureConfigLoaded();
-    
+  async getTrackingInfo(trackingIds, orderData = null) {
     try {
       console.log(`🔍 Getting tracking info for IDs:`, trackingIds);
       
-      if (!this.validateCredentials()) {
-        throw new Error('Missing required Ecotrack credentials');
+      // If we have order data, use it to select the appropriate account
+      // Otherwise, try to use default account
+      let accountSelection;
+      if (orderData) {
+        accountSelection = await this.getAccountForOrder(orderData);
+      } else {
+        // Use default account for tracking queries without order context
+        accountSelection = await this.getAccountForOrder({});
       }
+      
+      const selectedAccount = accountSelection.account;
+      console.log(`🏪 Using account for tracking: ${selectedAccount.name} (${accountSelection.source})`);
 
       if (!trackingIds || !Array.isArray(trackingIds) || trackingIds.length === 0) {
         throw new Error('Invalid tracking IDs provided');
@@ -468,8 +737,8 @@ class EcotrackService {
 
       // Call EcoTrack API to get tracking information
       const response = await axios.post('https://app.noest-dz.com/api/public/get/trackings/info', {
-        api_token: this.apiToken,
-        user_guid: this.userGuid,
+        api_token: selectedAccount.api_token,
+        user_guid: selectedAccount.user_guid,
         trackings: trackingIds
       }, {
         headers: {
@@ -480,7 +749,17 @@ class EcotrackService {
 
       console.log('🎯 EcoTrack tracking info response:', response.data);
 
-      return response.data || {};
+      return {
+        ...response.data,
+        // Include account usage information
+        account_used: {
+          id: selectedAccount.id,
+          name: selectedAccount.name,
+          location_name: selectedAccount.location_name,
+          selection_source: accountSelection.source,
+          selection_method: accountSelection.selection_method
+        }
+      };
       
     } catch (error) {
       console.error('Error getting tracking info:', error);
@@ -492,18 +771,23 @@ class EcotrackService {
    * Add a remark to an EcoTrack shipment
    * @param {string} trackingId - Ecotrack tracking ID
    * @param {string} content - Remark content
-   * @returns {Promise<Object>} - Add remark result
+   * @param {Object} orderData - Optional order data to help select account
+   * @returns {Promise<Object>} - Add remark result with account usage
    */
-  async addRemark(trackingId, content) {
-    // Ensure configuration is loaded from database
-    await this.ensureConfigLoaded();
-    
+  async addRemark(trackingId, content, orderData = null) {
     try {
       console.log(`💬 Adding remark to EcoTrack tracking ID: ${trackingId}`);
       
-      if (!this.validateCredentials()) {
-        throw new Error('Missing required Ecotrack credentials');
+      // Select the appropriate account
+      let accountSelection;
+      if (orderData) {
+        accountSelection = await this.getAccountForOrder(orderData);
+      } else {
+        accountSelection = await this.getAccountForOrder({});
       }
+      
+      const selectedAccount = accountSelection.account;
+      console.log(`🏪 Using account for remark: ${selectedAccount.name} (${accountSelection.source})`);
 
       if (!trackingId || !content) {
         throw new Error('Tracking ID and content are required');
@@ -511,7 +795,7 @@ class EcotrackService {
 
       // Call EcoTrack API to add remark
       const response = await axios.post('https://app.noest-dz.com/api/public/add/maj', {
-        api_token: this.apiToken,
+        api_token: selectedAccount.api_token,
         tracking: trackingId,
         content: content
       }, {
@@ -524,7 +808,17 @@ class EcotrackService {
 
       console.log('🎯 EcoTrack add remark response:', response.data);
 
-      return response.data || { success: true };
+      return {
+        ...response.data || { success: true },
+        // Account usage information
+        account_used: {
+          id: selectedAccount.id,
+          name: selectedAccount.name,
+          location_name: selectedAccount.location_name,
+          selection_source: accountSelection.source,
+          selection_method: accountSelection.selection_method
+        }
+      };
       
     } catch (error) {
       console.error('Error adding remark:', error);
@@ -536,18 +830,24 @@ class EcotrackService {
    * Delete an order in Ecotrack (only before validation)
    * @param {string} trackingId - Ecotrack tracking ID
    * @param {string} reason - Cancellation reason
-   * @returns {Promise<Object>} - Cancellation result
+   * @param {Object} orderData - Optional order data to help select account
+   * @returns {Promise<Object>} - Cancellation result with account usage
    */
-  async cancelShipment(trackingId, reason = 'Order cancelled') {
-    // Ensure configuration is loaded from database
-    await this.ensureConfigLoaded();
-    
+  async cancelShipment(trackingId, reason = 'Order cancelled', orderData = null) {
     console.log(`🚚 ❌ ECOTRACK CANCELLATION: Cancelling shipment for order ${trackingId}`);
     console.log(`🚚 Tracking ID to cancel: ${trackingId}`);
     
-    if (!this.validateCredentials()) {
-      throw new Error('Missing required Ecotrack credentials');
+    // Select the appropriate account
+    let accountSelection;
+    if (orderData) {
+      accountSelection = await this.getAccountForOrder(orderData);
+    } else {
+      // Use default account for cancellations without order context
+      accountSelection = await this.getAccountForOrder({});
     }
+    
+    const selectedAccount = accountSelection.account;
+    console.log(`🏪 Using account for cancellation: ${selectedAccount.name} (${accountSelection.source})`);
 
     // Validate tracking ID format
     if (!trackingId || typeof trackingId !== 'string' || trackingId.trim().length === 0) {
@@ -565,14 +865,14 @@ class EcotrackService {
 
     try {
       const requestData = {
-        api_token: this.apiToken,
-        user_guid: this.userGuid,
+        api_token: selectedAccount.api_token,
+        user_guid: selectedAccount.user_guid,
         tracking: cleanTrackingId
       };
 
       console.log('🗑️ Cancelling Ecotrack order with data:', {
-        api_token: this.apiToken,
-        user_guid: this.userGuid,
+        api_token: selectedAccount.api_token,
+        user_guid: selectedAccount.user_guid,
         tracking: cleanTrackingId
       });
       console.log('🌐 Making request to: https://app.noest-dz.com/api/public/delete/order');
@@ -598,7 +898,15 @@ class EcotrackService {
         success: true,
         tracking_id: trackingId,
         status: 'cancelled',
-        message: 'Order deleted successfully'
+        message: 'Order deleted successfully',
+        // Account usage information
+        account_used: {
+          id: selectedAccount.id,
+          name: selectedAccount.name,
+          location_name: selectedAccount.location_name,
+          selection_source: accountSelection.source,
+          selection_method: accountSelection.selection_method
+        }
       };
     } catch (error) {
       console.error('Ecotrack cancel shipment error:', error.response?.data || error.message);

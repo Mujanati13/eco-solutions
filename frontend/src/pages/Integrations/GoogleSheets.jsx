@@ -79,6 +79,68 @@ const GoogleSheetsAutoImport = () => {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
 
+  // Load saved settings from backend on component mount
+  useEffect(() => {
+    loadFileNamePatterns();
+    
+    const savedCronPattern = localStorage.getItem('googleSheets_cronPattern');
+    if (savedCronPattern) {
+      setCronPattern(savedCronPattern);
+    }
+  }, []);
+
+  // Load file name patterns from backend
+  const loadFileNamePatterns = async () => {
+    try {
+      const response = await fetch('/api/auto-import/file-patterns', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.patterns) {
+          setFileNamePatterns(result.patterns);
+        }
+      }
+    } catch (error) {
+      console.warn('Error loading file name patterns from backend:', error);
+    }
+  };
+
+  // Save settings to backend and localStorage
+  const saveSettings = async () => {
+    try {
+      setLoading(true);
+      
+      // Save file patterns to backend
+      const patternsResponse = await fetch('/api/auto-import/file-patterns', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ patterns: fileNamePatterns })
+      });
+      
+      if (!patternsResponse.ok) {
+        throw new Error('Failed to save file patterns to backend');
+      }
+      
+      // Save cron pattern to localStorage (backend handles this in start-auto-scan)
+      localStorage.setItem('googleSheets_cronPattern', cronPattern);
+      
+      message.success('Settings saved successfully');
+      setSettingsVisible(false);
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      message.error('Failed to save settings: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     checkConnection();
     loadStatistics();
@@ -528,10 +590,7 @@ const GoogleSheetsAutoImport = () => {
           <Button
             key="save"
             type="primary"
-            onClick={() => {
-              message.success('Settings saved successfully');
-              setSettingsVisible(false);
-            }}
+            onClick={saveSettings}
           >
             Save Settings
           </Button>

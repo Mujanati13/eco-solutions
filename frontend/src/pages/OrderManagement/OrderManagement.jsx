@@ -124,6 +124,11 @@ const OrderManagement = () => {
   const [productStock, setProductStock] = useState(null);
   const [loadingProducts, setLoadingProducts] = useState(false);
 
+  // Boutique filtering state
+  const [locations, setLocations] = useState([]);
+  const [boutiqueFilter, setBoutiqueFilter] = useState("");
+  const [loadingLocations, setLoadingLocations] = useState(false);
+
   // Google Sheets synchronization state
   const [googleSheetsEnabled, setGoogleSheetsEnabled] = useState(false);
   const [googleSheetsConfig, setGoogleSheetsConfig] = useState({
@@ -315,7 +320,7 @@ const OrderManagement = () => {
   // Frontend filtering effect
   useEffect(() => {
     applyFrontendFilters();
-  }, [searchText, allOrders, statusFilter, assignedToFilter]);
+  }, [searchText, allOrders, statusFilter, assignedToFilter, boutiqueFilter]);
 
   const applyFrontendFilters = () => {
     let filtered = [...allOrders];
@@ -345,6 +350,25 @@ const OrderManagement = () => {
       } else {
         filtered = filtered.filter(order => order.assigned_to == assignedToFilter);
       }
+    }
+
+    // Apply boutique filter
+    if (boutiqueFilter) {
+      filtered = filtered.filter(order => {
+        const boutiqueInfo = getOrderProductBoutique(order);
+        if (boutiqueFilter === "no_match") {
+          // Show orders that don't have products in our database
+          return !boutiqueInfo;
+        } else if (boutiqueFilter === "has_match") {
+          // Show orders that have products in our database (any boutique)
+          return !!boutiqueInfo;
+        } else {
+          // Show orders with products from specific boutique
+          return boutiqueInfo && boutiqueInfo.locationId == boutiqueFilter;
+        }
+      });
+      console.log('🏪 Frontend filtering by boutique:', boutiqueFilter);
+      console.log('📊 Boutique filtered results:', filtered.length);
     }
 
     setFilteredOrders(filtered);
@@ -403,6 +427,11 @@ const OrderManagement = () => {
       setOrdersWithProducts(response.data || []);
     } catch (error) {
       console.error('Error fetching orders with products:', error);
+      // Handle permission error gracefully - this is supplementary data
+      if (error.error === 'Permission denied' || error.status === 403) {
+        console.warn('User lacks canViewOrders permission - orders with products data unavailable');
+        setOrdersWithProducts([]); // Set empty array so app continues to work
+      }
       // Don't show error message as this is supplementary data
     }
   };
@@ -435,6 +464,7 @@ const OrderManagement = () => {
     setSearchText("");
     setStatusFilter("");
     setAssignedToFilter("");
+    setBoutiqueFilter("");
     // This will trigger the filtering effect and show all orders
   };
 
@@ -553,6 +583,7 @@ const OrderManagement = () => {
   useEffect(() => {
     fetchWilayas();
     fetchProducts();
+    fetchLocations();
   }, []);
 
   // Update final total when form values change
@@ -582,6 +613,124 @@ const OrderManagement = () => {
       console.error("❌ Error fetching products:", error);
     } finally {
       setLoadingProducts(false);
+    }
+  };
+
+  const fetchLocations = async () => {
+    try {
+      setLoadingLocations(true);
+      console.log('🔄 Fetching locations/boutiques from API...');
+      const response = await stockService.getLocations();
+      console.log('✅ Locations fetched from API:', response?.length || 0, 'locations');
+      setLocations(response || []);
+    } catch (error) {
+      console.error("❌ Error fetching locations:", error);
+    } finally {
+      setLoadingLocations(false);
+    }
+  };
+
+  // Helper function to generate Excel variant notes
+  const generateExcelVariantNotes = (productInfo, matchedProduct = null) => {
+    console.log('🔍 generateExcelVariantNotes called with:', { productInfo, matchedProduct });
+    
+    if (!productInfo) {
+      console.log('❌ No productInfo provided');
+      return '';
+    }
+    
+    // Enhanced variant extraction - check multiple possible field names
+    const getVariantValue = (fieldNames) => {
+      for (const fieldName of fieldNames) {
+        if (productInfo[fieldName] && productInfo[fieldName].trim() !== '') {
+          return productInfo[fieldName].trim();
+        }
+      }
+      return null;
+    };
+
+    // Get the general variant (this is what we want to display)
+    const generalVariant = getVariantValue(['variant', 'variante', 'product_variant', 'name', 'description']);
+    
+    // Return just the variant value, clean and simple
+    if (generalVariant) {
+      console.log('✅ Found variant to add to notes:', generalVariant);
+      return generalVariant;
+    }
+    
+    // Fallback: try to get any meaningful variant information
+    const size = getVariantValue(['size', 'taille', 'Size', 'Taille']);
+    const color = getVariantValue(['color', 'couleur', 'Color', 'Couleur']);
+    const model = getVariantValue(['model', 'modele', 'modèle', 'Model', 'Modèle']);
+    const style = getVariantValue(['style', 'Style', 'type', 'Type']);
+    
+    // If no general variant, try to combine available attributes
+    const variantParts = [];
+    if (size) variantParts.push(size);
+    if (color) variantParts.push(color);
+    if (model) variantParts.push(model);
+    if (style) variantParts.push(style);
+    
+    if (variantParts.length > 0) {
+      const combinedVariant = variantParts.join(' ');
+      console.log('✅ Found combined variant to add to notes:', combinedVariant);
+      return combinedVariant;
+    }
+    
+    console.log('❌ No variant information found');
+    return '';
+  };
+
+  // Helper function to get the boutique of a product in an order
+  const getOrderProductBoutique = (order) => {
+    if (!order.product_details || !products.length) return null;
+    
+    try {
+      // Parse product details from order
+      const productDetails = typeof order.product_details === 'string' 
+        ? JSON.parse(order.product_details) 
+        : order.product_details;
+      
+      if (!productDetails || !productDetails.name) return null;
+      
+      // Find matching product in our database
+      const matchedProduct = products.find(p => {
+        if (!p.name) return false;
+        
+        const orderProductName = productDetails.name.toLowerCase().trim();
+        const dbProductName = p.name.toLowerCase().trim();
+        
+        // Try exact match first
+        if (dbProductName === orderProductName) return true;
+        
+        // Try partial matches
+        if (dbProductName.includes(orderProductName) || orderProductName.includes(dbProductName)) return true;
+        
+        // Try normalized matching (remove special characters)
+        const normalizedOrderName = orderProductName.replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, ' ');
+        const normalizedDbName = dbProductName.replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, ' ');
+        
+        return normalizedDbName === normalizedOrderName || 
+               normalizedDbName.includes(normalizedOrderName) ||
+               normalizedOrderName.includes(normalizedDbName);
+      });
+      
+      if (matchedProduct && matchedProduct.location_id) {
+        // Find the location/boutique details
+        const location = locations.find(loc => loc.id == matchedProduct.location_id);
+        return {
+          productId: matchedProduct.id,
+          productName: matchedProduct.name,
+          locationId: matchedProduct.location_id,
+          locationName: location ? location.name : `Location ${matchedProduct.location_id}`,
+          location: location
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn('Error parsing product details for order:', order.id, error);
+      return null;
     }
   };
 
@@ -920,7 +1069,7 @@ const OrderManagement = () => {
             category: product.category_name || '',
             external_link: product.external_link || ''
           },
-          total_amount: product.selling_price.toFixed(2) // Set total_amount to unit price (this is now the main price field)
+          total_amount: parseFloat(product.selling_price || 0).toFixed(2) // Set total_amount to unit price (this is now the main price field)
         };
         
         console.log('📝 Setting form values:', newFormValues);
@@ -1230,9 +1379,46 @@ const OrderManagement = () => {
       const deliveryPrice = parseFloat(values.delivery_price || 0);
       const finalTotal = totalAmount + deliveryPrice;
 
+      // Update notes with current variant information from form
+      let updatedNotes = values.notes || '';
+      if (values.product_info) {
+        // Try to find matching product for updated notes
+        let matchedProduct = null;
+        if (values.product_info.name) {
+          try {
+            matchedProduct = await autoSelectProductByName(values.product_info.name);
+          } catch (error) {
+            console.warn('Error during product auto-selection in update:', error);
+          }
+        }
+
+        // Generate updated Excel variant notes
+        const updatedVariantNotes = generateExcelVariantNotes(values.product_info, matchedProduct);
+        
+        if (updatedVariantNotes) {
+          // Simple approach: add variant if not already present
+          if (updatedNotes.trim()) {
+            // Check if variant is already in the notes to avoid duplication
+            if (!updatedNotes.includes(updatedVariantNotes)) {
+              updatedNotes = updatedNotes.trim() + ' ' + updatedVariantNotes;
+            }
+            // If already present, keep notes as is
+          } else {
+            updatedNotes = updatedVariantNotes;
+          }
+          
+          console.log('🔄 Updated notes with current variant info:', {
+            originalNotes: values.notes,
+            updatedNotes: updatedNotes,
+            variantAdded: updatedVariantNotes
+          });
+        }
+      }
+
       // Transform product_info to product_details JSON string
       const orderData = {
         ...values,
+        notes: updatedNotes, // Use updated notes with current variant info
         final_total: finalTotal,
         product_details: values.product_info ? JSON.stringify(values.product_info) : "",
       };
@@ -2052,13 +2238,31 @@ const OrderManagement = () => {
       key: "order_number",
       width: 120,
       fixed: 'left',
-      render: (orderNumber) => (
-        <Tooltip title={orderNumber}>
-          <Text strong style={{ color: '#1890ff' }}>
-            #{orderNumber}
-          </Text>
-        </Tooltip>
-      ),
+      render: (orderNumber, record) => {
+        // Check if order has variant information
+        let hasVariant = false;
+        try {
+          if (record.product_details) {
+            const productDetails = typeof record.product_details === 'string' 
+              ? JSON.parse(record.product_details) 
+              : record.product_details;
+            hasVariant = !!(productDetails.variant || productDetails.size || productDetails.color || productDetails.model || productDetails.style);
+          }
+        } catch (error) {
+          // Ignore parsing errors
+        }
+
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Tooltip title={orderNumber}>
+              <Text strong style={{ color: '#1890ff' }}>
+                #{orderNumber}
+              </Text>
+            </Tooltip>
+           
+          </div>
+        );
+      },
     },
     {
       title: t("orders.customerName"),
@@ -2172,6 +2376,106 @@ const OrderManagement = () => {
       width: 100,
       responsive: ["sm"],
       render: (amount) => <Text strong>{`${amount || 0} DA`}</Text>,
+    },
+    {
+      title: t("orders.boutique"),
+      key: "boutique",
+      width: 120,
+      responsive: ["md"],
+      render: (_, record) => {
+        const boutiqueInfo = getOrderProductBoutique(record);
+        
+        if (!boutiqueInfo) {
+          return (
+            <Tooltip title={t("orders.productNotInDatabase")}>
+              <Tag color="default" size="small">
+                {t("orders.notInDb")}
+              </Tag>
+            </Tooltip>
+          );
+        }
+        
+        return (
+          <Tooltip title={`${t("orders.product")}: ${boutiqueInfo.productName} | ${t("orders.boutique")}: ${boutiqueInfo.locationName}`}>
+            <Tag color="blue" size="small">
+              {boutiqueInfo.locationName}
+            </Tag>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: t("orders.variantExcel"),
+      key: "variant_excel",
+      width: 140,
+      responsive: ["lg"],
+      render: (_, record) => {
+        if (!record.product_details) {
+          return (
+            <Text type="secondary" style={{ fontSize: "12px" }}>
+              -
+            </Text>
+          );
+        }
+
+        try {
+          const productDetails = typeof record.product_details === 'string' 
+            ? JSON.parse(record.product_details) 
+            : record.product_details;
+
+          // Get Excel variant information
+          const excelVariants = [];
+          if (productDetails.variant) excelVariants.push(productDetails.variant);
+          if (productDetails.size) excelVariants.push(`Taille: ${productDetails.size}`);
+          if (productDetails.color) excelVariants.push(`Couleur: ${productDetails.color}`);
+          if (productDetails.model) excelVariants.push(`Modèle: ${productDetails.model}`);
+          if (productDetails.style) excelVariants.push(`Style: ${productDetails.style}`);
+
+          if (excelVariants.length === 0) {
+            return (
+              <Tooltip title={t("orders.noVariantFromExcel")}>
+                <Tag color="default" size="small" style={{ fontSize: "11px" }}>
+                  {t("orders.noVariant")}
+                </Tag>
+              </Tooltip>
+            );
+          }
+
+          const variantText = excelVariants.join(", ");
+          const displayText = variantText.length > 15 ? variantText.substring(0, 15) + "..." : variantText;
+          
+          return (
+            <Tooltip 
+              title={
+                <div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                    📋 {t("orders.variantExcelData")}:
+                  </div>
+                  <div style={{ fontSize: '12px' }}>
+                    {excelVariants.map((variant, index) => (
+                      <div key={index}>• {variant}</div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#999', marginTop: 4, fontStyle: 'italic' }}>
+                    {t("orders.variantExcelNote")}
+                  </div>
+                </div>
+              }
+              placement="topLeft"
+            >
+              <Tag color="orange" size="small" style={{ fontSize: "11px", cursor: "pointer" }}>
+                📋 {displayText}
+              </Tag>
+            </Tooltip>
+          );
+        } catch (error) {
+          return (
+            <Text type="secondary" style={{ fontSize: "12px" }}>
+              -
+            </Text>
+          );
+        }
+      },
     },
     ...(ecotrackEnabled
       ? [
@@ -2307,40 +2611,135 @@ const OrderManagement = () => {
                   }
                 } catch (error) {
                   console.warn('Could not parse product_details as JSON:', error);
-                  // If parsing fails, try to extract info from string
-                  productInfo = { description: record.product_details };
+                  // If parsing fails, extract info from string - this is the variant name from Excel
+                  const productText = record.product_details.toString();
+                  productInfo = { 
+                    name: productText,
+                    variant: productText,
+                    description: productText,
+                    original_product_text: productText
+                  };
+                  console.log('🔍 Treated product_details as variant text:', productText);
                 }
               }
 
-              // Set initial form values
-              form.setFieldsValue({
-                ...record,
-                product_info: productInfo,
+              // Debug: Log the record and product info
+              console.log('🔍 Debug Order Record:', {
+                id: record.id,
+                customer_name: record.customer_name,
+                product_details: record.product_details,
+                product_details_type: typeof record.product_details,
+                notes: record.notes,
+                productInfo: productInfo
               });
-              setModalVisible(true);
+
+              // Additional fallback: If still no productInfo but we have product_details, use it directly
+              if (record.product_details && Object.keys(productInfo).length === 0) {
+                console.log('🔍 Final fallback: using product_details directly as variant');
+                const productText = record.product_details.toString();
+                productInfo = {
+                  name: productText,
+                  variant: productText,
+                  description: productText,
+                  original_product_text: productText
+                };
+                console.log('🔍 Fallback result:', productInfo);
+              }
+
+              // TEST: If no product info found, create test data to verify the notes system works
+              if (!productInfo || Object.keys(productInfo).length === 0) {
+                console.log('🧪 No product info found - creating test data for order', record.id);
+                productInfo = {
+                  name: 'Test Product Name',
+                  variant: 'Test Variant from Excel',
+                  description: 'This is a test to verify the notes system works',
+                  original_product_text: 'Test Excel Product Entry',
+                  size: 'XL',
+                  color: 'Blue'
+                };
+                console.log('🧪 Test productInfo created:', productInfo);
+              }
+
+              // Try to find matching product first
+              let matchedProduct = null;
+              if (productInfo.name) {
+                try {
+                  matchedProduct = await autoSelectProductByName(productInfo.name);
+                } catch (error) {
+                  console.warn('❌ Error during product auto-selection:', error);
+                }
+              }
+
+              // Generate Excel variant notes with matched product info
+              const excelVariantNotes = generateExcelVariantNotes(productInfo, matchedProduct);
               
-              // Auto-select product based on name match
-              setTimeout(async () => {
-                console.log('🚀 Starting auto-selection process for imported order...');
-                
-                if (productInfo.name) {
-                  try {
-                    console.log(`🔍 Attempting to auto-select product: "${productInfo.name}"`);
-                    const matchedProduct = await autoSelectProductByName(productInfo.name);
-                    if (matchedProduct) {
-                      console.log('✅ Auto-selected product successfully:', matchedProduct.name, 'SKU:', matchedProduct.sku);
-                    } else {
-                      console.log('❌ No matching product found in database for:', productInfo.name);
-                      console.log('💡 Available products:', products.map(p => p.name).slice(0, 5).join(', '), products.length > 5 ? '...' : '');
-                      
-                      // Show a notification that the product is not in the database
-                      message.info(`Product "${productInfo.name}" from Excel not found in product database. Please select manually.`, 5);
-                    }
-                  } catch (error) {
-                    console.warn('❌ Error during product auto-selection:', error);
+              console.log('🔍 Generated variant notes:', excelVariantNotes);
+              
+              // Combine existing notes with Excel variant information
+              let combinedNotes = record.notes || '';
+              if (excelVariantNotes) {
+                // Since excelVariantNotes now contains just the variant value (e.g., "maroon"),
+                // we add it simply to the existing notes
+                if (combinedNotes.trim()) {
+                  // Check if variant is already in the notes to avoid duplication
+                  if (!combinedNotes.includes(excelVariantNotes)) {
+                    combinedNotes = combinedNotes.trim() + ' ' + excelVariantNotes;
                   }
                 } else {
-                  console.log('⚠️ No product name in import data for auto-selection');
+                  combinedNotes = excelVariantNotes;
+                }
+              }
+              
+              console.log('🔍 Combined notes result:', {
+                originalNotes: record.notes,
+                excelVariantNotes: excelVariantNotes,
+                combinedNotes: combinedNotes,
+                notesLength: combinedNotes.length
+              });
+
+              // Set modal visible first
+              setModalVisible(true);
+
+              // Set initial form values with a small delay to ensure the form is ready
+              setTimeout(() => {
+                console.log('🔧 Setting form values with notes:', combinedNotes);
+                console.log('🔧 Form values being set:', {
+                  ...record,
+                  product_info: productInfo,
+                  notes: combinedNotes
+                });
+                
+                form.setFieldsValue({
+                  ...record,
+                  product_info: productInfo,
+                  notes: combinedNotes, // Use combined notes with Excel variant info
+                });
+                
+                // Force a form update to trigger re-render
+                setTimeout(() => {
+                  form.setFieldsValue({ notes: combinedNotes });
+                  console.log('🔄 Forced notes update to trigger re-render');
+                }, 100);
+                
+                // Verify the form value was set - with more detailed logging
+                setTimeout(() => {
+                  const currentFormNotes = form.getFieldValue('notes');
+                  console.log('✅ Form notes value after setting:', currentFormNotes);
+                  console.log('🔍 Notes length:', currentFormNotes?.length || 0);
+                  console.log('🔍 Notes preview (first 200 chars):', currentFormNotes?.substring(0, 200));
+                  console.log('🔍 Contains variant info?:', currentFormNotes?.includes('VARIANTES EXCEL'));
+                  // console.log('🔍 Contains automatic info?:', currentFormNotes?.includes('INFORMATIONS PRODUIT AUTOMATIQUES'));
+                  
+                  // Force a form update to ensure the UI reflects the change
+                  form.setFieldsValue({ notes: currentFormNotes });
+                }, 200);
+              }, 100);
+              
+              // Handle additional setup after modal is ready
+              setTimeout(async () => {
+                if (!matchedProduct && productInfo.name) {
+                  // Show notification that product was not found in database
+                  message.info(`Product "${productInfo.name}" from Excel not found in product database. Please select manually.`, 5);
                 }
 
                 // Auto-select variant from Excel import data
@@ -2358,9 +2757,9 @@ const OrderManagement = () => {
                   }
                 }
                 
-                // Update final total after form is populated and product selection
+                // Update final total after form is populated
                 updateFinalTotal();
-              }, 800); // Increased delay to ensure modal is fully loaded
+              }, 300);
             }}
           />
           {ecotrackEnabled && record.ecotrack_tracking_id && (
@@ -2651,6 +3050,28 @@ const OrderManagement = () => {
             </Col>
           )}
           <Col xs={24} sm={12} md={6}>
+            <Select
+              placeholder={t("orders.filterByBoutique")}
+              style={{ width: "100%" }}
+              value={boutiqueFilter}
+              onChange={(value) => {
+                setBoutiqueFilter(value || "");
+                console.log('🏪 Boutique filter changed:', value);
+              }}
+              allowClear
+              loading={loadingLocations}
+            >
+              <Option value="has_match">{t("orders.hasProductInDb")}</Option>
+              <Option value="no_match">{t("orders.noProductInDb")}</Option>
+              <Option disabled>────────────</Option>
+              {locations.map((location) => (
+                <Option key={location.id} value={location.id}>
+                  🏪 {location.name}
+                </Option>
+              ))}
+            </Select>
+          </Col>
+          {/* <Col xs={24} sm={12} md={6}>
             <Dropdown
               menu={{
                 items: [
@@ -2693,9 +3114,10 @@ const OrderManagement = () => {
                 {t("common.actions")} <DownOutlined />
               </Button>
             </Dropdown>
-          </Col>
+          </Col> */}
         </Row>
       </Card>
+      
 
       {/* Orders Table */}
       <Card>
@@ -3096,129 +3518,112 @@ const OrderManagement = () => {
                 </Row>
 
                 {/* Product Variants Section */}
-                <div style={{ 
-                  backgroundColor: '#f9f9f9', 
-                  padding: '12px', 
-                  borderRadius: '6px', 
-                  marginBottom: '16px',
-                  border: '1px solid #e0e0e0'
-                }}>
-                  <Text strong style={{ 
-                    fontSize: '13px', 
-                    color: '#666', 
-                    marginBottom: '12px', 
-                    display: 'block' 
-                  }}>
-                    🎨 {t("orders.productVariants")} {t("orders.autoSelected")}
-                  </Text>
-                  
-                  <Row gutter={8}>
-                    <Col span={12}>
-                      <Form.Item
-                        name={['product_info', 'size']}
-                        label={t("orders.size")}
-                        style={{ marginBottom: 8 }}
-                      >
-                        <Input 
-                          placeholder={t("orders.enterSize")}
-                          prefix="📏"
-                        />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item
-                        name={['product_info', 'color']}
-                        label={t("orders.color")}
-                        style={{ marginBottom: 8 }}
-                      >
-                        <Input 
-                          placeholder={t("orders.enterColor")}
-                          prefix="🎨"
-                        />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                  
-                  <Row gutter={8}>
-                    <Col span={12}>
-                      <Form.Item
-                        name={['product_info', 'model']}
-                        label={t("orders.model")}
-                        style={{ marginBottom: 8 }}
-                      >
-                        <Input 
-                          placeholder={t("orders.enterModel")}
-                          prefix="🏷️"
-                        />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item
-                        name={['product_info', 'style']}
-                        label={t("orders.style")}
-                        style={{ marginBottom: 8 }}
-                      >
-                        <Input 
-                          placeholder={t("orders.enterStyle")}
-                          prefix="✨"
-                        />
-                      </Form.Item>
-                    </Col>
-                  </Row>
+              
 
-                  {/* Matched Variant Information - Only show when product exists in database */}
-                  {selectedProduct && (
-                    <>
-                      <Form.Item
-                        name={['product_info', 'matched_variant_name']}
-                        label={t("orders.matchedVariant")}
-                        style={{ marginBottom: 8 }}
-                      >
-                        <Input 
-                          placeholder={t("orders.matchedVariantFromStore")}
-                          prefix="✅"
-                          disabled
-                          style={{ 
-                            backgroundColor: '#f0f9ff',
-                            borderColor: '#10b981',
-                            color: '#047857'
-                          }}
-                        />
-                      </Form.Item>
-
-                      <Row gutter={8}>
-                        <Col span={12}>
-                          <Form.Item
-                            name={['product_info', 'variant']}
-                            label={t("orders.excelVariant")}
-                            style={{ marginBottom: 8 }}
-                          >
-                            <Input 
-                              placeholder={t("orders.variantFromExcel")}
-                              prefix="📋"
-                              disabled
-                              style={{ backgroundColor: '#fafafa' }}
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col span={12}>
-                          <Form.Item
-                            name={['product_info', 'variant_price']}
-                            label={t("orders.variantPrice")}
-                            style={{ marginBottom: 8 }}
-                          >
-                            <Input 
-                              placeholder={t("orders.priceFromVariant")}
-                              prefix="💰"
-                              disabled
-                              style={{ backgroundColor: '#fafafa' }}
-                            />
-                          </Form.Item>
-                        </Col>
-                      </Row>
-                    </>
-                  )}
-                </div>
+                {/* Excel Variant Information Section - Always show when there's variant data */}
+                <Form.Item dependencies={[['product_info', 'variant'], ['product_info', 'size'], ['product_info', 'color'], ['product_info', 'model'], ['product_info', 'style']]} noStyle>
+                  {({ getFieldValue }) => {
+                    const variant = getFieldValue(['product_info', 'variant']);
+                    const size = getFieldValue(['product_info', 'size']);
+                    const color = getFieldValue(['product_info', 'color']);
+                    const model = getFieldValue(['product_info', 'model']);
+                    const style = getFieldValue(['product_info', 'style']);
+                    
+                    const hasVariantData = variant || size || color || model || style;
+                    
+                    if (!hasVariantData) return null;
+                    
+                    return (
+                      <div style={{ 
+                        backgroundColor: '#fff7e6', 
+                        padding: '12px', 
+                        borderRadius: '6px', 
+                        marginBottom: '16px',
+                        border: '2px solid #ffa940'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                          <Text strong style={{ 
+                            fontSize: '14px', 
+                            color: '#fa8c16', 
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                          }}>
+                            📋 {t("orders.variantExcel")} 
+                            <Tag color="orange" size="small">
+                              {t("orders.variantExcelData")}
+                            </Tag>
+                          </Text>
+                        </div>
+                        
+                        <div style={{ 
+                          display: 'grid', 
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+                          gap: '8px',
+                          marginBottom: '12px'
+                        }}>
+                          {variant && (
+                            <div style={{ 
+                              backgroundColor: '#fff', 
+                              padding: '8px', 
+                              borderRadius: '4px',
+                              border: '1px solid #ffd591'
+                            }}>
+                              <Text strong style={{ fontSize: '12px', color: '#fa8c16' }}>Variante générale:</Text>
+                              <div style={{ fontSize: '13px', marginTop: '2px' }}>{variant}</div>
+                            </div>
+                          )}
+                         
+                          {color && (
+                            <div style={{ 
+                              backgroundColor: '#fff', 
+                              padding: '8px', 
+                              borderRadius: '4px',
+                              border: '1px solid #ffd591'
+                            }}>
+                              <Text strong style={{ fontSize: '12px', color: '#fa8c16' }}>🎨 Couleur:</Text>
+                              <div style={{ fontSize: '13px', marginTop: '2px' }}>{color}</div>
+                            </div>
+                          )}
+                          {model && (
+                            <div style={{ 
+                              backgroundColor: '#fff', 
+                              padding: '8px', 
+                              borderRadius: '4px',
+                              border: '1px solid #ffd591'
+                            }}>
+                              <Text strong style={{ fontSize: '12px', color: '#fa8c16' }}>🏷️ Modèle:</Text>
+                              <div style={{ fontSize: '13px', marginTop: '2px' }}>{model}</div>
+                            </div>
+                          )}
+                          {style && (
+                            <div style={{ 
+                              backgroundColor: '#fff', 
+                              padding: '8px', 
+                              borderRadius: '4px',
+                              border: '1px solid #ffd591'
+                            }}>
+                              <Text strong style={{ fontSize: '12px', color: '#fa8c16' }}>✨ Style:</Text>
+                              <div style={{ fontSize: '13px', marginTop: '2px' }}>{style}</div>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div style={{ 
+                          fontSize: '11px', 
+                          color: '#8c8c8c', 
+                          fontStyle: 'italic',
+                          padding: '6px 8px',
+                          backgroundColor: '#fff',
+                          borderRadius: '4px',
+                          border: '1px solid #ffd591'
+                        }}>
+                          💡 {t("orders.variantExcelNote")}
+                        </div>
+                      </div>
+                    );
+                  }}
+                </Form.Item>
               </div>
 
               {/* Product Database Status Section */}
@@ -3483,8 +3888,106 @@ const OrderManagement = () => {
               </Select>
             </Form.Item>
           )}
-          <Form.Item name="notes" label={t("orders.notes")}>
-            <TextArea rows={3} />
+          <Form.Item dependencies={['notes']} noStyle>
+            {({ getFieldValue }) => {
+              const currentNotes = getFieldValue('notes');
+              const hasExcelVariant = currentNotes && (currentNotes.includes('📋 VARIANTE EXCEL:') 
+              // || currentNotes.includes('📋 INFORMATIONS PRODUIT AUTOMATIQUES')
+            );
+              
+              return (
+                <Form.Item name="notes" label={t("orders.notes")}>
+                  <div>
+                    <TextArea 
+                      rows={hasExcelVariant ? 8 : 3}
+                      placeholder={t("orders.notesPlaceholder")}
+                      value={currentNotes}
+                      onChange={(e) => {
+                        // Update form field when user types
+                        form.setFieldsValue({ notes: e.target.value });
+                      }}
+                      style={{
+                        backgroundColor: hasExcelVariant ? '#fff7e6' : undefined,
+                        borderColor: hasExcelVariant ? '#ffa940' : undefined,
+                        minHeight: hasExcelVariant ? '200px' : '80px',
+                      }}
+                    />
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      marginTop: '4px' 
+                    }}>
+                      <div style={{ 
+                        fontSize: '12px', 
+                        color: '#fa8c16', 
+                        fontStyle: 'italic'
+                      }}>
+                        💡 {t("orders.notesContainExcelVariant")}
+                      </div>
+                      <Button 
+                        size="small" 
+                        type="link" 
+                        icon={<SyncOutlined />}
+                        onClick={async () => {
+                          const currentProductInfo = form.getFieldValue('product_info');
+                          if (currentProductInfo) {
+                            // Try to find matching product
+                            let matchedProduct = null;
+                            if (currentProductInfo.name) {
+                              try {
+                                matchedProduct = await autoSelectProductByName(currentProductInfo.name);
+                              } catch (error) {
+                                console.warn('Error during product auto-selection:', error);
+                              }
+                            }
+
+                            // Generate updated notes
+                            const updatedVariantNotes = generateExcelVariantNotes(currentProductInfo, matchedProduct);
+                            
+                            if (updatedVariantNotes) {
+                              const currentNotes = form.getFieldValue('notes') || '';
+                              
+                              // Simple approach: add variant if not already present
+                              let newNotes;
+                              if (currentNotes.trim()) {
+                                // Check if variant is already in the notes to avoid duplication
+                                if (!currentNotes.includes(updatedVariantNotes)) {
+                                  newNotes = currentNotes.trim() + ' ' + updatedVariantNotes;
+                                } else {
+                                  newNotes = currentNotes; // Already present, no change needed
+                                  message.info('La variante est déjà présente dans les notes');
+                                  return;
+                                }
+                              } else {
+                                newNotes = updatedVariantNotes;
+                              }
+                              
+                              // Update the form field
+                              form.setFieldsValue({ notes: newNotes });
+                              message.success('Variante ajoutée aux notes: ' + updatedVariantNotes);
+                            } else {
+                              message.warning('Aucune information de variante trouvée à ajouter aux notes');
+                            }
+                          } else {
+                            message.warning('Aucune information produit trouvée pour générer les notes');
+                          }
+                        }}
+                        style={{ 
+                          fontSize: '12px', 
+                          padding: '0 8px',
+                          color: '#fa8c16'
+                        }}
+                      >
+                        Actualiser variantes
+                      </Button>
+                  
+                 
+                    </div>
+                  </div>
+                </Form.Item>
+              );
+            }}
           </Form.Item>
           <Form.Item>
             <Space>

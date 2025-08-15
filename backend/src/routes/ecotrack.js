@@ -189,8 +189,27 @@ router.post('/delete-order',
 
       console.log(`🗑️ EcoTrack delete request for tracking ID: ${trackingId}`);
       
-      // Step 1: Delete from EcoTrack first
-      const result = await ecotrackService.cancelShipment(trackingId, reason || 'Order cancelled');
+      // Get order data if orderId is provided (for better account selection)
+      let orderData = null;
+      if (orderId) {
+        try {
+          const { pool } = require('../../config/database');
+          const [orders] = await pool.query(
+            'SELECT * FROM orders WHERE id = ?',
+            [orderId]
+          );
+          
+          if (orders.length > 0) {
+            orderData = orders[0];
+            console.log(`📄 Using order data for account selection: ${orderData.order_number}`);
+          }
+        } catch (dbError) {
+          console.warn('⚠️ Could not fetch order from database:', dbError.message);
+        }
+      }
+      
+      // Step 1: Delete from EcoTrack first (with order data for account selection)
+      const result = await ecotrackService.cancelShipment(trackingId, reason || 'Order cancelled', orderData);
       
       // Step 2: If EcoTrack deletion successful and we have order ID, update local order status
       if (result.success && orderId) {
@@ -205,11 +224,12 @@ router.post('/delete-order',
           
           console.log(`✅ Order ${orderId} status updated to "cancelled" after EcoTrack deletion`);
           
-          // Log the status change
+          // Log the status change with account information
           await pool.query(`
             INSERT INTO tracking_logs (order_id, user_id, action, new_status, details, created_at)
             VALUES (?, ?, ?, ?, ?, NOW())
-          `, [orderId, req.user.id, 'ecotrack_deleted', 'cancelled', `Order cancelled in EcoTrack (tracking ID: ${trackingId})`]);
+          `, [orderId, req.user.id, 'ecotrack_deleted', 'cancelled', 
+              `Order cancelled in EcoTrack (tracking ID: ${trackingId}) using account: ${result.account_used?.name || 'Unknown'}`]);
           
         } catch (statusUpdateError) {
           console.error('❌ Failed to update order status after EcoTrack deletion:', statusUpdateError);
@@ -278,8 +298,32 @@ router.post('/create-order',
 
       console.log(`🚚 EcoTrack create request for order:`, orderData);
       
-      // Use the service to create the order
-      const result = await ecotrackService.createShipment(orderData);
+      // Get full order data if orderId is provided (for better account selection)
+      let fullOrderData = orderData;
+      if (orderId) {
+        try {
+          const { pool } = require('../../config/database');
+          const [orders] = await pool.query(
+            'SELECT * FROM orders WHERE id = ?',
+            [orderId]
+          );
+          
+          if (orders.length > 0) {
+            // Merge database order data with provided data
+            fullOrderData = {
+              ...orders[0],
+              ...orderData,
+              id: orderId
+            };
+            console.log(`📄 Enhanced order data with database info for account selection`);
+          }
+        } catch (dbError) {
+          console.warn('⚠️ Could not fetch order from database:', dbError.message);
+        }
+      }
+      
+      // Use the service to create the order with enhanced data
+      const result = await ecotrackService.createShipment(fullOrderData);
       
       // If order creation was successful and we have an order ID, update the order status
       if (result.success && orderId) {
@@ -294,11 +338,12 @@ router.post('/create-order',
           
           console.log(`✅ Order ${orderId} status updated to "out_for_delivery" with tracking ID: ${result.tracking_id}`);
           
-          // Log the status change
+          // Log the status change with account information
           await pool.query(`
             INSERT INTO tracking_logs (order_id, user_id, action, new_status, details, created_at)
             VALUES (?, ?, ?, ?, ?, NOW())
-          `, [orderId, req.user.id, 'ecotrack_created', 'out_for_delivery', `Order sent to EcoTrack with tracking ID: ${result.tracking_id}`]);
+          `, [orderId, req.user.id, 'ecotrack_created', 'out_for_delivery', 
+              `Order sent to EcoTrack with tracking ID: ${result.tracking_id} using account: ${result.account_used?.name || 'Unknown'}`]);
           
         } catch (statusUpdateError) {
           console.error('❌ Failed to update order status:', statusUpdateError);
@@ -341,7 +386,7 @@ router.post('/tracking-info',
   requireAnyPermission(['canViewOrders', 'canViewIntegrations']),
   async (req, res) => {
     try {
-      const { trackingIds } = req.body;
+      const { trackingIds, orderData } = req.body;
       
       if (!trackingIds || !Array.isArray(trackingIds) || trackingIds.length === 0) {
         return res.status(400).json({
@@ -352,8 +397,8 @@ router.post('/tracking-info',
 
       console.log(`🔍 EcoTrack tracking info request for IDs:`, trackingIds);
       
-      // Use the service to get tracking information
-      const result = await ecotrackService.getTrackingInfo(trackingIds);
+      // Use the service to get tracking information (with optional order data for account selection)
+      const result = await ecotrackService.getTrackingInfo(trackingIds, orderData);
       
       res.json({
         success: true,
@@ -379,7 +424,7 @@ router.post('/add-remark',
   requirePermission('canEditOrders'),
   async (req, res) => {
     try {
-      const { trackingId, content } = req.body;
+      const { trackingId, content, orderData } = req.body;
       
       if (!trackingId) {
         return res.status(400).json({
@@ -397,8 +442,8 @@ router.post('/add-remark',
 
       console.log(`💬 EcoTrack add remark request for tracking ID: ${trackingId}`);
       
-      // Use the service to add remark
-      const result = await ecotrackService.addRemark(trackingId, content.trim());
+      // Use the service to add remark (with optional order data for account selection)
+      const result = await ecotrackService.addRemark(trackingId, content.trim(), orderData);
       
       res.json({
         success: true,
