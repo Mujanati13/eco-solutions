@@ -31,7 +31,7 @@ class BaladiaSupport {
         SELECT COLUMN_NAME 
         FROM INFORMATION_SCHEMA.COLUMNS 
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'delivery_pricing'
-      `, [process.env.DB_NAME || 'eco_s_orders']);
+      `, [process.env.DB_NAME || 'eco_s_db']);
 
       const existingColumns = columns.map(col => col.COLUMN_NAME);
 
@@ -53,7 +53,7 @@ class BaladiaSupport {
         SELECT COLUMN_NAME 
         FROM INFORMATION_SCHEMA.COLUMNS 
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'orders'
-      `, [process.env.DB_NAME || 'eco_s_orders']);
+      `, [process.env.DB_NAME || 'eco_s_db']);
 
       const existingOrderColumns = orderColumns.map(col => col.COLUMN_NAME);
 

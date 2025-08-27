@@ -419,6 +419,9 @@
     "customerAddress": "Adresse du Client",
     "customerCity": "Ville du Client",
     "totalAmount": "Montant Produit (DA)",
+    "finalTotal": "Total Final",
+    "productAmount": "Montant Produit",
+    "deliveryPrice": "Prix de Livraison",
     "wilayaCode": "Code Wilaya",
     "status": "Statut",
     "assignedTo": "Assigné à",
@@ -599,7 +602,6 @@
         "performanceBasedDesc": "Assigner plus de commandes aux membres de l'équipe les plus performants"
       }
     },
-    "finalTotal": "Total Final (Montant + Livraison)",
     "variantExcel": "Variante Excel",
     "hasExcelVariant": "A une Variante Excel",
     "variantExcelData": "Données de Variante Excel",
@@ -1208,7 +1210,6 @@
     "cityRequired": "La ville est obligatoire",
     "totalAmount": "Montant Total",
     "totalAmountRequired": "Le montant total est obligatoire",
-    "finalTotal": "Total Final (Montant + Livraison)",
     "productName": "Nom du Produit",
     "productNameRequired": "Le nom du produit est obligatoire",
     "deliveryType": "Type de Livraison",

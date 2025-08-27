@@ -159,6 +159,23 @@ class EcotrackMultiAccountService {
       }
 
       // Prepare order data according to EcoTrack API requirements
+      // Determine type_id based on delivery type
+      // 1: Livraison (Delivery) - default for home/stop_desk
+      // 2: Échange (Exchange) - for les_changes
+      // 3: Pick up - for pickup points
+      let typeId = 1; // Default to delivery
+      const deliveryType = orderData.delivery_type || 'home';
+      
+      if (deliveryType === 'les_changes') {
+        typeId = 2; // Exchange
+        console.log('🔄 Les Changes delivery type detected - setting type_id to 2 (Échange)');
+      } else if (deliveryType === 'pickup_point') {
+        typeId = 3; // Pick up
+        console.log('📦 Pickup point delivery type detected - setting type_id to 3 (Pick up)');
+      } else {
+        console.log('🚚 Standard delivery type detected - setting type_id to 1 (Livraison)');
+      }
+
       const ecotrackOrderData = {
         api_token: account.api_token,
         user_guid: account.user_guid,
@@ -170,9 +187,9 @@ class EcotrackMultiAccountService {
         wilaya_id: orderData.wilaya_id || 16, // Default to Algiers
         commune: orderData.commune || orderData.customer_city || 'Commune',
         montant: parseFloat(orderData.total_amount) || 0,
-        remarque: orderData.notes || '',
+        remarque: this.cleanRemarque(orderData.notes || '', orderData.quantity),
         produit: productDetails.name || 'Product',
-        type_id: 1, // Standard delivery
+        type_id: typeId, // Dynamic based on delivery_type (1: Livraison, 2: Échange, 3: Pick up)
         poids: Math.max(1, Math.floor(orderData.weight || productDetails.weight || 1)),
         stop_desk: 0, // Home delivery
         stock: 0,
@@ -376,6 +393,12 @@ class EcotrackMultiAccountService {
       
       console.log(`🔑 Using account: ${account.account_name}`);
       
+      // Debug: Log the content being sent
+      console.log(`📝 DEBUG - Adding remark to tracking ${trackingId}:`);
+      console.log(`📝 DEBUG - Content being sent: "${content}"`);
+      console.log(`📝 DEBUG - Content length: ${content.length} characters`);
+      console.log(`📝 DEBUG - API Token (last 4 chars): ***${account.api_token.slice(-4)}`);
+      
       const response = await axios.post('https://app.noest-dz.com/api/public/add/maj', {
         api_token: account.api_token,
         tracking: trackingId,
@@ -387,6 +410,28 @@ class EcotrackMultiAccountService {
         },
         timeout: 30000
       });
+      
+      // Debug: Log the response
+      console.log(`📝 DEBUG - EcoTrack add remark response:`, response.data);
+      console.log(`📝 DEBUG - Response status: ${response.status}`);
+      console.log(`📝 DEBUG - Response headers:`, response.headers);
+      
+      // Wait a moment and then check if the remark was actually updated
+      console.log(`🕐 DEBUG - Waiting 2 seconds to check if remark was updated...`);
+      setTimeout(async () => {
+        try {
+          const trackingInfo = await this.getTrackingInfo([trackingId], locationId);
+          const orderInfo = trackingInfo[trackingId]?.OrderInfo;
+          if (orderInfo) {
+            console.log(`📝 DEBUG - Remark after update: "${orderInfo.remarque}"`);
+            console.log(`📝 DEBUG - Does it contain our content "${content}"? ${orderInfo.remarque.includes(content)}`);
+          } else {
+            console.log(`📝 DEBUG - Could not fetch tracking info to verify remark update`);
+          }
+        } catch (e) {
+          console.log(`📝 DEBUG - Error checking remark update:`, e.message);
+        }
+      }, 2000);
 
       console.log('🎯 EcoTrack add remark response:', response.data);
       
@@ -462,6 +507,82 @@ class EcotrackMultiAccountService {
       console.error('❌ Error getting all accounts:', error);
       throw error;
     }
+  }
+
+  /**
+   * Clean remarque text by removing duplicates, unwanted text, and product names
+   * Also adds quantity and colis ouvrable information
+   * @param {string} notes - Original notes/remarque text
+   * @param {number} quantity - Order quantity (optional)
+   * @returns {string} - Cleaned remarque text
+   */
+  cleanRemarque(notes = '', quantity = null) {
+    let remarqueParts = [];
+    
+    // Add quantity information if available
+    if (quantity && quantity > 0) {
+      remarqueParts.push(`Quantité: ${quantity}`);
+    }
+    
+    // Add "colis ouvrable" information
+    remarqueParts.push('Colis ouvrable');
+    
+    // Process original notes if available
+    if (notes && notes.trim()) {
+      let cleanNotes = notes.trim();
+      
+      // Keep "colis ouvrable" text (no longer removing it since we add it explicitly)
+      // cleanNotes = cleanNotes.replace(/colis ouvrable/gi, '').trim();
+      
+      // Remove potential product name patterns
+      cleanNotes = cleanNotes.replace(/^[A-Z\s]+[A-Z]+$/g, '').trim(); // Remove all-caps product names
+      cleanNotes = cleanNotes.replace(/\b[A-Z]{2,}\s+[A-Z]{2,}[A-Z\s]*\b/g, '').trim(); // Remove patterns like "WOMEN CAT LUNETTE"
+    
+      // Split by common separators and remove duplicates
+      const noteParts = cleanNotes.split(/[|,;]/).map(part => part.trim()).filter(part => part.length > 1);
+      const addedPartsLower = new Set(['quantité', 'colis ouvrable']); // Track what we've already added
+      
+      for (const part of noteParts) {
+        // Skip parts that look like product names (all uppercase, multiple words)
+        if (/^[A-Z\s]+[A-Z]+$/.test(part) && part.split(' ').length > 1) {
+          console.log(`📝 Skipping product name pattern: "${part}"`);
+          continue;
+        }
+        
+        const partLower = part.toLowerCase();
+        
+        // Check if this part or a similar part already exists
+        let isDuplicate = false;
+        for (const addedPart of addedPartsLower) {
+          if (addedPart.includes(partLower) || partLower.includes(addedPart)) {
+            isDuplicate = true;
+            break;
+          }
+        }
+        
+        if (!isDuplicate) {
+          remarqueParts.push(part);
+          addedPartsLower.add(partLower);
+        }
+      }
+    }
+    
+    // Join all parts and clean up
+    let cleanedRemarque = remarqueParts.join(' | ');
+    
+    // Additional cleanup: remove redundant separators
+    cleanedRemarque = cleanedRemarque.replace(/\s*\|\s*\|\s*/g, ' | ');
+    cleanedRemarque = cleanedRemarque.replace(/^\s*\|\s*/, '');
+    cleanedRemarque = cleanedRemarque.replace(/\s*\|\s*$/, '');
+    cleanedRemarque = cleanedRemarque.trim();
+    
+    // Ensure it doesn't exceed 255 characters (EcoTrack limit)
+    if (cleanedRemarque.length > 255) {
+      cleanedRemarque = cleanedRemarque.substring(0, 252) + '...';
+    }
+    
+    console.log(`📝 Cleaned remarque (removed product names): "${notes}" -> "${cleanedRemarque}"`);
+    return cleanedRemarque;
   }
 }
 

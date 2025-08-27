@@ -10,6 +10,11 @@ class EcotrackService {
     this.isEnabled = false;
     this.configLoaded = false;
     
+    // Cache for station codes
+    this.stationCodesCache = null;
+    this.stationCodesCacheExpiry = null;
+    this.CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    
     // Start loading configuration from database on startup (don't await)
     this.loadConfigFromDatabase().catch(error => {
       console.error('❌ Failed to load initial EcoTrack config:', error);
@@ -552,17 +557,53 @@ class EcotrackService {
         }
       }
       
-      // Special handling for Tamanrasset - try alternative names if needed
-      if (finalCommune === 'Tamanrasset' || finalCommune === 'تمنراست') {
-        console.log(`🏜️ Special handling for Tamanrasset commune`);
-        // Try different formats that Ecotrack might accept
-        // Based on database, try other communes in Tamanrasset wilaya
-        finalCommune = 'In Salah'; // Try In Salah as it's a major city in the same wilaya
-      }
+      // Validate and fix commune name for Ecotrack using comprehensive mapping
+      finalCommune = this.validateAndFixCommune(finalCommune, finalWilayaId);
       
       console.log(`  - Final wilaya_id: ${finalWilayaId}`);
       console.log(`  - Final commune: "${finalCommune}"`);
       console.log(`  - Original commune from order: "${orderData.commune}"`);
+      
+      // Determine which montant to use - prioritize frontend calculation
+      const finalMontant = orderData.montant || this.calculateTotalAmount(orderData);
+      const montantSource = orderData.montant ? 'Frontend (Total Final)' : 'Backend calculation';
+      
+      // Log delivery pricing details for debugging
+      console.log(`🚚 Delivery pricing breakdown:`, {
+        delivery_type: orderData.delivery_type,
+        delivery_price: orderData.delivery_price,
+        total_amount: orderData.total_amount,
+        calculated_montant: finalMontant,
+        source: montantSource
+      });
+      
+      // Determine stop_desk value based ONLY on delivery type
+      // 0: à domicile (home delivery), 1: stop desk (pickup point)
+      const deliveryType = orderData.delivery_type || 'home';
+      const hasStationCode = orderData.station_code || orderData.ecotrack_station_code;
+      
+      // ONLY use stop desk if explicitly selected as delivery type
+      const stopDesk = deliveryType === 'stop_desk' ? 1 : 0;
+      
+      console.log(`🚚 Delivery type: ${deliveryType}, station_code: ${hasStationCode}, stop_desk: ${stopDesk}`);
+      
+      // Determine type_id based on delivery type
+      // 1: Livraison (Delivery) - default for home/stop_desk
+      // 2: Échange (Exchange) - for les_changes
+      // 3: Pick up - for pickup points
+      let typeId = 1; // Default to delivery
+      
+      if (deliveryType === 'les_changes') {
+        typeId = 2; // Exchange
+        console.log('🔄 Les Changes delivery type detected - setting type_id to 2 (Échange)');
+      } else if (deliveryType === 'pickup_point') {
+        typeId = 3; // Pick up
+        console.log('📦 Pickup point delivery type detected - setting type_id to 3 (Pick up)');
+      } else {
+        console.log('🚚 Standard delivery type detected - setting type_id to 1 (Livraison)');
+      }
+      
+      console.log(`💰 Using montant: ${finalMontant} DA (Source: ${montantSource})`);
       
       const ecotrackOrderData = {
         api_token: selectedAccount.api_token, // Required - from selected account
@@ -574,17 +615,27 @@ class EcotrackService {
         adresse: orderData.customer_address || orderData.customer_city || 'Address', // Required | max:255 - Use address or city as fallback
         wilaya_id: finalWilayaId, // Required | integer between 1,48
         commune: finalCommune, // Required | max:255
-        montant: parseFloat(orderData.total_amount) || 0, // Required | numeric
-        remarque: orderData.notes || '', // max:255
+        montant: finalMontant, // Required | numeric - Use frontend Total Final or backend calculation
+        remarque: this.buildRemarqueWithConfirmer(orderData.notes, orderData.confirmed_by_name, productDetails, orderData.quantity) || '', // max:255
         produit: productDetails.name || 'Product', // Required
-        type_id: 1, // Required | integer between 1,3 (1: Livraison, 2: Échange, 3: Pick up)
+        type_id: typeId, // Required | integer between 1,3 (1: Livraison, 2: Échange, 3: Pick up) - determined by delivery_type
         poids: Math.max(1, Math.floor(orderData.weight || productDetails.weight || 1)), // Required | integer (minimum 1)
-        stop_desk: 0, // Required | integer between 0,1 (0: à domicile, 1: stop desk)
+        stop_desk: stopDesk, // Required | integer between 0,1 (0: à domicile, 1: stop desk) - determined from delivery_type or station_code
+        station_code: stopDesk === 1 ? (orderData.ecotrack_station_code || orderData.station_code || await this.getStationCodeForWilaya(finalWilayaId)) : undefined, // Required only for stop_desk = 1
         stock: 0, // integer between 0,1 (0: Non, 1: Oui) - set to 0 since stock module is disabled
         can_open: 0 // integer between 0,1 (0: Non, 1: Oui) - default to no
       };
 
-      console.log('🚚 Creating Ecotrack order with new API:', ecotrackOrderData);
+      console.log('🚚 Creating Ecotrack order with new API:', {
+        ...ecotrackOrderData,
+        api_token: '***' + ecotrackOrderData.api_token.slice(-4), // Hide full token in logs
+      });
+      
+      if (stopDesk === 1) {
+        console.log(`🚉 Stop desk delivery - Station selection: ${orderData.station_code ? 'Frontend provided' : 'API fetched'} - Using: ${ecotrackOrderData.station_code}`);
+      } else {
+        console.log(`🏠 Home delivery - No station code required`);
+      }
 
       // Use the correct API endpoint for creating orders
       console.log('🌐 Making request to: https://app.noest-dz.com/api/public/create/order');
@@ -793,6 +844,12 @@ class EcotrackService {
         throw new Error('Tracking ID and content are required');
       }
 
+      // Debug: Log the content being sent
+      console.log(`📝 DEBUG - Adding remark to tracking ${trackingId}:`);
+      console.log(`📝 DEBUG - Content being sent: "${content}"`);
+      console.log(`📝 DEBUG - Content length: ${content.length} characters`);
+      console.log(`📝 DEBUG - API Token (last 4 chars): ***${selectedAccount.api_token.slice(-4)}`);
+
       // Call EcoTrack API to add remark
       const response = await axios.post('https://app.noest-dz.com/api/public/add/maj', {
         api_token: selectedAccount.api_token,
@@ -806,6 +863,10 @@ class EcotrackService {
         timeout: 30000
       });
 
+      // Debug: Log the response
+      console.log(`📝 DEBUG - EcoTrack add remark response:`, response.data);
+      console.log(`📝 DEBUG - Response status: ${response.status}`);
+      console.log(`📝 DEBUG - Response headers:`, response.headers);
       console.log('🎯 EcoTrack add remark response:', response.data);
 
       return {
@@ -1012,6 +1073,615 @@ class EcotrackService {
     } catch (error) {
       console.error('Ecotrack health check failed:', error.message);
       return false;
+    }
+  }
+
+  /**
+   * Build remarque field including confirmer name, original notes, product variant, quantity and colis ouvrable
+   * @param {string} notes - Original order notes
+   * @param {string} confirmerName - Name of person who confirmed the order
+   * @param {Object} productDetails - Product details object (optional)
+   * @param {number} quantity - Order quantity (optional)
+   * @returns {string} - Combined remarque with confirmer, notes, variant, quantity and colis ouvrable
+   */
+  buildRemarqueWithConfirmer(notes = '', confirmerName = '', productDetails = null, quantity = null) {
+    let remarque = '';
+    const addedParts = new Set(); // Track added parts to prevent duplicates
+    
+    // Add quantity information if available
+    if (quantity && quantity > 0) {
+      const quantityPart = `Quantité: ${quantity}`;
+      remarque += quantityPart;
+      addedParts.add(quantityPart.toLowerCase());
+    }
+    
+    // Add "colis ouvrable" information
+    const colisOuvrablePart = 'Colis ouvrable';
+    if (remarque) {
+      remarque += ' | ';
+    }
+    remarque += colisOuvrablePart;
+    addedParts.add(colisOuvrablePart.toLowerCase());
+    
+    // Add confirmer information if available
+    if (confirmerName && confirmerName.trim()) {
+      const confirmerPart = `Confirmé par: ${confirmerName.trim()}`;
+      if (remarque) {
+        remarque += ' | ';
+      }
+      remarque += confirmerPart;
+      addedParts.add(confirmerPart.toLowerCase());
+    }
+    
+    // Add product variant information if available
+    if (productDetails) {
+      let variant = '';
+      
+      // Try to extract variant from different possible fields
+      if (productDetails.variant) {
+        variant = productDetails.variant;
+      } else if (productDetails.variante) {
+        variant = productDetails.variante;
+      } else if (productDetails.product_variant) {
+        variant = productDetails.product_variant;
+      } else if (productDetails.size || productDetails.color || productDetails.model) {
+        // Build variant from individual attributes
+        const variantParts = [];
+        if (productDetails.size) variantParts.push(productDetails.size);
+        if (productDetails.color) variantParts.push(productDetails.color);
+        if (productDetails.model) variantParts.push(productDetails.model);
+        variant = variantParts.join(' ');
+      }
+      
+      if (variant && variant.trim()) {
+        const variantPart = `Variante: ${variant.trim()}`;
+        if (!addedParts.has(variantPart.toLowerCase())) {
+          if (remarque) {
+            remarque += ' | ';
+          }
+          remarque += variantPart;
+          addedParts.add(variantPart.toLowerCase());
+        }
+      }
+    }
+    
+    // Clean and process notes
+    if (notes && notes.trim()) {
+      let cleanNotes = notes.trim();
+      
+      // Keep "colis ouvrable" text (no longer removing it since we add it explicitly)
+      // cleanNotes = cleanNotes.replace(/colis ouvrable/gi, '').trim();
+      
+      // Remove potential product name patterns (anything that looks like a product name)
+      // Remove common product patterns like "PRODUCT NAME", product codes, etc.
+      cleanNotes = cleanNotes.replace(/^[A-Z\s]+[A-Z]+$/g, '').trim(); // Remove all-caps product names
+      cleanNotes = cleanNotes.replace(/\b[A-Z]{2,}\s+[A-Z]{2,}[A-Z\s]*\b/g, '').trim(); // Remove patterns like "WOMEN CAT LUNETTE"
+      
+      // Split notes by common separators and process each part
+      const noteParts = cleanNotes.split(/[|,;]/).map(part => part.trim()).filter(part => part.length > 0);
+      
+      for (const notePart of noteParts) {
+        // Skip empty parts or very short meaningless parts
+        if (notePart.length < 2) continue;
+        
+        // Skip parts that look like product names (all uppercase, multiple words)
+        if (/^[A-Z\s]+[A-Z]+$/.test(notePart) && notePart.split(' ').length > 1) {
+          console.log(`📝 Skipping product name pattern: "${notePart}"`);
+          continue;
+        }
+        
+        // Check if this part is already included (case-insensitive)
+        const notePartLower = notePart.toLowerCase();
+        let isDuplicate = false;
+        
+        for (const addedPart of addedParts) {
+          if (addedPart.includes(notePartLower) || notePartLower.includes(addedPart)) {
+            isDuplicate = true;
+            break;
+          }
+        }
+        
+        if (!isDuplicate) {
+          if (remarque) {
+            remarque += ' | ';
+          }
+          remarque += notePart;
+          addedParts.add(notePartLower);
+        }
+      }
+    }
+    
+    // Additional cleanup: remove redundant separators and spaces
+    remarque = remarque.replace(/\s*\|\s*\|\s*/g, ' | '); // Fix double separators
+    remarque = remarque.replace(/^\s*\|\s*/, ''); // Remove leading separator
+    remarque = remarque.replace(/\s*\|\s*$/, ''); // Remove trailing separator
+    remarque = remarque.trim();
+    
+    // Ensure it doesn't exceed 255 characters (EcoTrack limit)
+    if (remarque.length > 255) {
+      remarque = remarque.substring(0, 252) + '...';
+    }
+    
+    console.log(`📝 Built clean remarque: "${remarque}" (from confirmer: "${confirmerName}", variant: "${productDetails?.variant || 'none'}", notes: "${notes}")`);
+    console.log(`📝 Removed duplicates and cleaned: original length ${(confirmerName + (productDetails?.variant || '') + notes).length} -> final length ${remarque.length}`);
+    return remarque;
+  }
+
+  /**
+   * Calculate the correct total amount for EcoTrack
+   * Priority: (product_price * quantity) + delivery_price, fallback to other methods
+   * @param {Object} orderData - Order data
+   * @returns {number} - Total amount including delivery
+   */
+  calculateTotalAmount(orderData) {
+    let totalAmount = 0;
+    
+    console.log(`🧮 Calculating total amount from order data:`, {
+      total_amount: orderData.total_amount,
+      delivery_price: orderData.delivery_price,
+      final_total: orderData.final_total,
+      montant: orderData.montant,
+      delivery_type: orderData.delivery_type,
+      product_details: orderData.product_details ? 'Available' : 'Missing'
+    });
+    
+    // Extract product details for proper calculation
+    let productDetails = null;
+    if (orderData.product_details) {
+      try {
+        productDetails = typeof orderData.product_details === 'string' 
+          ? JSON.parse(orderData.product_details) 
+          : orderData.product_details;
+      } catch (error) {
+        console.warn('⚠️ Could not parse product_details:', error.message);
+      }
+    }
+    
+    // Method 1: Calculate from product details (unit_price * quantity) + delivery_price
+    if (productDetails && productDetails.unit_price && productDetails.quantity) {
+      const unitPrice = parseFloat(productDetails.unit_price) || 0;
+      const quantity = parseFloat(productDetails.quantity) || 1;
+      let deliveryPrice = parseFloat(orderData.delivery_price) || 0;
+      
+      // Ensure delivery price is correct for delivery type
+      if (orderData.delivery_type === 'stop_desk' && deliveryPrice > 0) {
+        console.log(`🚉 Stop desk delivery detected - delivery price: ${deliveryPrice} DA`);
+      } else if (orderData.delivery_type === 'home' && deliveryPrice > 0) {
+        console.log(`🏠 Home delivery detected - delivery price: ${deliveryPrice} DA`);
+      }
+      
+      totalAmount = (unitPrice * quantity) + deliveryPrice;
+      console.log(`✅ Using product details method: (${unitPrice} × ${quantity}) + ${deliveryPrice} = ${totalAmount}`);
+      return totalAmount;
+    }
+    
+    // Method 2: Handle multiple products in product_details array
+    if (productDetails && Array.isArray(productDetails)) {
+      let productsTotal = 0;
+      console.log(`📦 Multiple products detected: ${productDetails.length} items`);
+      
+      productDetails.forEach((product, index) => {
+        const unitPrice = parseFloat(product.unit_price || product.price) || 0;
+        const quantity = parseFloat(product.quantity) || 1;
+        const productSubtotal = unitPrice * quantity;
+        productsTotal += productSubtotal;
+        
+        console.log(`  Product ${index + 1}: ${product.name || 'Unknown'} - ${unitPrice} × ${quantity} = ${productSubtotal} DA`);
+      });
+      
+      const deliveryPrice = parseFloat(orderData.delivery_price) || 0;
+      totalAmount = productsTotal + deliveryPrice;
+      
+      console.log(`✅ Multiple products total: ${productsTotal} + delivery ${deliveryPrice} = ${totalAmount} DA`);
+      return totalAmount;
+    }
+    
+    // Method 3: total_amount + delivery_price (assuming total_amount already includes quantity)
+    const productAmount = parseFloat(orderData.total_amount) || 0;
+    const deliveryAmount = parseFloat(orderData.delivery_price) || 0;
+    
+    if (productAmount > 0) {
+      totalAmount = productAmount + deliveryAmount;
+      console.log(`✅ Using total_amount + delivery method: ${productAmount} + ${deliveryAmount} = ${totalAmount}`);
+      return totalAmount;
+    }
+    
+    // Method 4: final_total (if calculated)
+    if (orderData.final_total && parseFloat(orderData.final_total) > 0) {
+      totalAmount = parseFloat(orderData.final_total);
+      console.log(`✅ Using final_total: ${totalAmount}`);
+      return totalAmount;
+    }
+    
+    // Method 4: montant (frontend calculated)
+    if (orderData.montant && parseFloat(orderData.montant) > 0) {
+      totalAmount = parseFloat(orderData.montant);
+      console.log(`✅ Using montant field: ${totalAmount}`);
+      return totalAmount;
+    }
+    
+    // Fallback: just the product amount
+    if (productAmount > 0) {
+      totalAmount = productAmount;
+      console.log(`⚠️ Fallback to product amount only: ${totalAmount}`);
+      return totalAmount;
+    }
+    
+    console.warn(`⚠️ Could not calculate valid total amount, using 0`);
+    return 0;
+  }
+
+  /**
+   * Get station code for a given wilaya (required when stop_desk = 1)
+   * Fetches from EcoTrack API and caches the result
+   * @param {number} wilayaId - Wilaya ID
+   * @returns {Promise<string>} - Station code for the wilaya
+   */
+  async getStationCodeForWilaya(wilayaId) {
+    try {
+      // Get fresh station codes from API
+      const stations = await this.fetchStationCodes();
+      
+      // Find station for the given wilaya
+      const station = stations.find(s => {
+        // Match by wilaya ID in the code (format like "01A", "02A", etc.)
+        const stationWilayaId = parseInt(s.code.substring(0, 2));
+        return stationWilayaId === wilayaId;
+      });
+      
+      if (station) {
+        console.log(`🚉 Found station for wilaya ${wilayaId}: ${station.code} (${station.name})`);
+        return station.code;
+      }
+      
+      // Fallback to Alger if not found
+      console.warn(`⚠️ No station found for wilaya ${wilayaId}, using Alger fallback`);
+      const algerStation = stations.find(s => s.code.startsWith('16'));
+      return algerStation ? algerStation.code : '16A';
+      
+    } catch (error) {
+      console.error(`❌ Error getting station code for wilaya ${wilayaId}:`, error.message);
+      // Fallback to hardcoded mapping if API fails
+      return this.getFallbackStationCode(wilayaId);
+    }
+  }
+
+  /**
+   * Fetch station codes from EcoTrack API with caching
+   * @returns {Promise<Array>} - Array of station objects
+   */
+  async fetchStationCodes() {
+    // Check if we have valid cached data
+    if (this.stationCodesCache && 
+        this.stationCodesCacheExpiry && 
+        Date.now() < this.stationCodesCacheExpiry) {
+      console.log('📋 Using cached station codes');
+      return this.stationCodesCache;
+    }
+    
+    console.log('🌐 Fetching fresh station codes from EcoTrack API...');
+    
+    try {
+      // Ensure we have credentials
+      await this.ensureConfigLoaded();
+      
+      // Use any available account for fetching stations
+      let apiToken = this.apiToken;
+      let userGuid = this.userGuid;
+      
+      // Try to get credentials from default account if global config not available
+      if (!apiToken || !userGuid) {
+        const defaultAccount = await this.getDefaultAccount();
+        if (defaultAccount) {
+          apiToken = defaultAccount.api_token;
+          userGuid = defaultAccount.user_guid;
+        }
+      }
+      
+      if (!apiToken || !userGuid) {
+        throw new Error('No EcoTrack credentials available for fetching stations');
+      }
+      
+      const response = await axios.get('https://app.noest-dz.com/api/public/desks', {
+        params: {
+          api_token: apiToken,
+          user_guid: userGuid
+        },
+        headers: {
+          'Accept': 'application/json',
+        },
+        timeout: 30000
+      });
+      
+      console.log('🔍 Raw API response:', response.status, response.data);
+      
+      if (response.data) {
+        let stations = response.data;
+        
+        // Handle different response formats
+        if (response.data.data && Array.isArray(response.data.data)) {
+          stations = response.data.data;
+          console.log('📊 Using response.data.data format');
+        } else if (!Array.isArray(response.data)) {
+          console.log('🔍 Non-array response format:', typeof response.data);
+          console.log('🔍 Response keys:', Object.keys(response.data));
+          
+          // Handle object format like {"01A": {"code": "1A", "name": "Adrar", ...}, "02A": {...}}
+          if (typeof response.data === 'object' && response.data !== null) {
+            const stationKeys = Object.keys(response.data);
+            if (stationKeys.length > 0) {
+              // Convert object format to array format
+              stations = stationKeys.map(key => {
+                const station = response.data[key];
+                return {
+                  id: key,
+                  code: station.code || key,
+                  name: station.name || station.libelle || key,
+                  ...station
+                };
+              });
+              console.log('📊 Converted object format to array format');
+              console.log(`🔍 Converted ${stations.length} stations from object keys`);
+            } else {
+              console.error('❌ Empty object response');
+              throw new Error('Empty object response from stations API');
+            }
+          } else if (response.data.stations && Array.isArray(response.data.stations)) {
+            stations = response.data.stations;
+            console.log('📊 Using response.data.stations format');
+          } else if (response.data.desks && Array.isArray(response.data.desks)) {
+            stations = response.data.desks;
+            console.log('📊 Using response.data.desks format');
+          } else {
+            console.error('❌ Unknown response structure:', response.data);
+            throw new Error(`Invalid response format: expected array or object with stations/desks`);
+          }
+        } else {
+          console.log('📊 Using direct array format');
+        }
+        
+        if (Array.isArray(stations) && stations.length > 0) {
+          this.stationCodesCache = stations;
+          this.stationCodesCacheExpiry = Date.now() + this.CACHE_DURATION;
+          
+          console.log(`✅ Fetched ${stations.length} station codes from EcoTrack API`);
+          console.log('� Sample stations:', stations.slice(0, 3).map(s => `${s.code || s.id}: ${s.name}`));
+          
+          return stations;
+        } else {
+          console.warn('⚠️ Empty stations array received');
+          return [];
+        }
+      } else {
+        throw new Error('Empty response from stations API');
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to fetch station codes from API:', error.message);
+      
+      // Return cached data if available, even if expired
+      if (this.stationCodesCache) {
+        console.log('🔄 Using expired cached station codes as fallback');
+        return this.stationCodesCache;
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Fallback station codes when API is unavailable
+   * @param {number} wilayaId - Wilaya ID
+   * @returns {string} - Fallback station code
+   */
+  getFallbackStationCode(wilayaId) {
+    // Simplified fallback mapping based on common patterns
+    const fallbackCodes = {
+      16: '16A', // Alger
+      31: '31A', // Oran
+      25: '25A', // Constantine
+      23: '23A', // Annaba
+      19: '19A', // Setif
+      15: '15A', // Tizi Ouzou
+      6: '06A',  // Bejaia
+      9: '09A',  // Blida
+      21: '21A', // Skikda
+      27: '27A'  // Mostaganem
+    };
+    
+    // Format wilaya ID with leading zero if needed
+    const formattedWilayaId = wilayaId.toString().padStart(2, '0');
+    const fallbackCode = fallbackCodes[wilayaId] || `${formattedWilayaId}A`;
+    
+    console.log(`� Using fallback station code for wilaya ${wilayaId}: ${fallbackCode}`);
+    return fallbackCode;
+  }
+
+  /**
+   * Validate and fix commune names to match EcoTrack accepted values
+   * @param {string} commune - Original commune name
+   * @param {number} wilayaId - Wilaya ID for context
+   * @returns {string} - Valid commune name
+   */
+  validateAndFixCommune(commune, wilayaId) {
+    if (!commune || typeof commune !== 'string') {
+      return this.getDefaultCommuneForWilaya(wilayaId);
+    }
+    
+    const originalCommune = commune;
+    
+    // Common problematic communes mapping
+    const communeMapping = {
+      'Douira': 'Alger Centre',
+      'douira': 'Alger Centre',
+      'Tamanrasset': 'In Salah',
+      'تمنراست': 'In Salah',
+      'Bir Mourad Rais': 'Bir Mourad Rais',
+      'El Harrach': 'El Harrach',
+      'Rouiba': 'Rouiba',
+      'Reghaia': 'Reghaia',
+      'Dar El Beida': 'Dar El Beida',
+      // Staoueli area alternatives (common misspelling)
+      'Setaouali': 'Staoueli',
+      'setaouali': 'Staoueli',
+      // Oum El Bouaghi alternatives
+      'Oum El Bouaghi': 'Oum el bouaghi',
+      'Oum el Bouaghi': 'Oum el bouaghi',
+      'Oum el bouaghi': 'Oum el bouaghi',
+      'أم البواقي': 'Oum el bouaghi'
+    };
+    
+    // Direct mapping first
+    if (communeMapping[commune]) {
+      console.log(`🔄 Mapped commune "${originalCommune}" to "${communeMapping[commune]}"`);
+      return communeMapping[commune];
+    }
+    
+    // Case-insensitive mapping
+    const lowerCommune = commune.toLowerCase();
+    for (const [key, value] of Object.entries(communeMapping)) {
+      if (key.toLowerCase() === lowerCommune) {
+        console.log(`🔄 Case-insensitive mapping: "${originalCommune}" to "${value}"`);
+        return value;
+      }
+    }
+    
+    // If commune contains problematic words, fallback to wilaya default
+    const problematicTerms = ['non spécifiée', 'unknown', 'undefined', 'null'];
+    if (problematicTerms.some(term => lowerCommune.includes(term))) {
+      const defaultCommune = this.getDefaultCommuneForWilaya(wilayaId);
+      console.log(`🔄 Problematic commune "${originalCommune}" mapped to default: "${defaultCommune}"`);
+      return defaultCommune;
+    }
+    
+    // Return original if it seems valid
+    return commune;
+  }
+
+  /**
+   * Get default commune for a wilaya
+   * @param {number} wilayaId - Wilaya ID
+   * @returns {string} - Default commune name
+   */
+  getDefaultCommuneForWilaya(wilayaId) {
+    const defaultCommunes = {
+      1: 'Adrar',
+      2: 'Chlef',
+      3: 'Laghouat',
+      4: 'Oum el bouaghi',
+      5: 'Batna',
+      6: 'Bejaia',
+      7: 'Biskra',
+      8: 'Bechar',
+      9: 'Blida',
+      10: 'Bouira',
+      11: 'In Salah', // Tamanrasset -> In Salah
+      12: 'Tebessa',
+      13: 'Tlemcen',
+      14: 'Tiaret',
+      15: 'Tizi Ouzou',
+      16: 'Alger Centre', // Alger
+      17: 'Djelfa',
+      18: 'Jijel',
+      19: 'Setif',
+      20: 'Saida',
+      21: 'Skikda',
+      22: 'Sidi Bel Abbes',
+      23: 'Annaba',
+      24: 'Guelma',
+      25: 'Constantine',
+      26: 'Medea',
+      27: 'Mostaganem',
+      28: 'M\'Sila',
+      29: 'Mascara',
+      30: 'Ouargla',
+      31: 'Oran',
+      32: 'El Bayadh',
+      33: 'Illizi',
+      34: 'Bordj Bou Arreridj',
+      35: 'Boumerdes',
+      36: 'El Tarf',
+      37: 'Tindouf',
+      38: 'Tissemsilt',
+      39: 'El Oued',
+      40: 'Khenchela',
+      41: 'Souk Ahras',
+      42: 'Tipaza',
+      43: 'Mila',
+      44: 'Ain Defla',
+      45: 'Naama',
+      46: 'Ain Temouchent',
+      47: 'Ghardaia',
+      48: 'Relizane'
+    };
+    
+    return defaultCommunes[wilayaId] || 'Alger Centre';
+  }
+
+  /**
+   * Get delivery fees for all wilayas from EcoTrack fees API
+   * API documentation shows POST but actual implementation requires GET
+   * @returns {Object} Delivery fees data from EcoTrack API
+   */
+  async getDeliveryFees() {
+    try {
+      await this.ensureConfigLoaded();
+      
+      console.log('📡 [ECOTRACK] Fetching delivery fees from official API...');
+      
+      // API requires GET method with query parameters (despite documentation showing POST)
+      const params = new URLSearchParams({
+        api_token: this.apiToken,
+        user_guid: this.userGuid
+      });
+      
+      const url = `${this.baseURL}/public/fees?${params.toString()}`;
+      
+      console.log('📡 [ECOTRACK] Calling fees API (GET method - API actual requirement):', {
+        url: `${this.baseURL}/public/fees`,
+        api_token: this.apiToken ? '***' + this.apiToken.slice(-4) : 'NOT SET',
+        user_guid: this.userGuid ? '***' + this.userGuid.slice(-4) : 'NOT SET',
+        method: 'GET (API requires GET despite documentation showing POST)'
+      });
+      
+      const response = await axios.get(url, {
+        timeout: 30000,
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      
+      console.log('🚚 [ECOTRACK] Fees API response status:', response.status);
+      console.log('🚚 [ECOTRACK] Fees API response data:', JSON.stringify(response.data, null, 2));
+      
+      // Handle the response format based on actual API behavior
+      if (response.data) {
+        // Check if response has the expected structure from documentation
+        if (response.data.tarifs && response.data.tarifs.return) {
+          return response.data;
+        }
+        // Fallback: check if response is direct wilaya mapping
+        else if (typeof response.data === 'object' && Object.keys(response.data).some(key => !isNaN(key))) {
+          return { tarifs: { return: response.data } };
+        }
+        // Return as-is and let the calling code handle it
+        else {
+          return response.data;
+        }
+      } else {
+        throw new Error('Empty response from EcoTrack fees API');
+      }
+      
+    } catch (error) {
+      console.error('❌ [ECOTRACK] Error fetching delivery fees:', error.message);
+      if (error.response) {
+        console.error('❌ [ECOTRACK] API Error Response:', {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data
+        });
+      }
+      throw error;
     }
   }
 }

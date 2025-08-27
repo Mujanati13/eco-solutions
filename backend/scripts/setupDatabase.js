@@ -14,7 +14,7 @@ const setupDatabase = async () => {
     });
 
     // Create database if it doesn't exist
-    const dbName = process.env.DB_NAME || 'eco_s_orders';
+    const dbName = process.env.DB_NAME || 'eco_s_db';
     await connection.execute(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
     console.log(`✅ Database '${dbName}' created or already exists`);
 

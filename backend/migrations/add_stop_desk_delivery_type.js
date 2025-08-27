@@ -1,8 +1,8 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
-// Migration to add 'les_changes' to delivery_type ENUM
-const addLesChangesDeliveryType = async () => {
+// Migration to add 'stop_desk' to delivery_type ENUM
+const addStopDeskDeliveryType = async () => {
   let connection;
   
   try {
@@ -16,7 +16,7 @@ const addLesChangesDeliveryType = async () => {
       charset: 'utf8mb4'
     });
 
-    console.log('🔄 Starting delivery_type ENUM update to add "les_changes"...');
+    console.log('🔄 Starting delivery_type ENUM update to add "stop_desk"...');
 
     // Check current ENUM values for orders table
     const [ordersColumns] = await connection.execute(`
@@ -30,22 +30,28 @@ const addLesChangesDeliveryType = async () => {
     if (ordersColumns.length > 0) {
       console.log('📋 Current orders.delivery_type ENUM:', ordersColumns[0].COLUMN_TYPE);
       
-      // Update orders table delivery_type ENUM
-      await connection.execute(`
-        ALTER TABLE orders 
-        MODIFY COLUMN delivery_type ENUM(
-          'home', 
-          'office', 
-          'pickup_point', 
-          'express', 
-          'standard', 
-          'overnight', 
-          'weekend', 
-          'economy',
-          'les_changes'
-        ) DEFAULT 'home'
-      `);
-      console.log('✅ Updated orders.delivery_type ENUM to include "les_changes"');
+      // Check if stop_desk is already in the ENUM
+      if (ordersColumns[0].COLUMN_TYPE.includes('stop_desk')) {
+        console.log('✅ stop_desk already exists in orders.delivery_type ENUM');
+      } else {
+        // Update orders table delivery_type ENUM
+        await connection.execute(`
+          ALTER TABLE orders 
+          MODIFY COLUMN delivery_type ENUM(
+            'home', 
+            'office', 
+            'pickup_point', 
+            'express', 
+            'standard', 
+            'overnight', 
+            'weekend', 
+            'economy',
+            'les_changes',
+            'stop_desk'
+          ) DEFAULT 'home'
+        `);
+        console.log('✅ Updated orders.delivery_type ENUM to include "stop_desk"');
+      }
     }
 
     // Check current ENUM values for delivery_pricing table
@@ -60,22 +66,28 @@ const addLesChangesDeliveryType = async () => {
     if (pricingColumns.length > 0) {
       console.log('📋 Current delivery_pricing.delivery_type ENUM:', pricingColumns[0].COLUMN_TYPE);
       
-      // Update delivery_pricing table delivery_type ENUM
-      await connection.execute(`
-        ALTER TABLE delivery_pricing 
-        MODIFY COLUMN delivery_type ENUM(
-          'home', 
-          'office', 
-          'pickup_point', 
-          'express', 
-          'standard', 
-          'overnight', 
-          'weekend', 
-          'economy',
-          'les_changes'
-        ) DEFAULT 'home'
-      `);
-      console.log('✅ Updated delivery_pricing.delivery_type ENUM to include "les_changes"');
+      // Check if stop_desk is already in the ENUM
+      if (pricingColumns[0].COLUMN_TYPE.includes('stop_desk')) {
+        console.log('✅ stop_desk already exists in delivery_pricing.delivery_type ENUM');
+      } else {
+        // Update delivery_pricing table delivery_type ENUM
+        await connection.execute(`
+          ALTER TABLE delivery_pricing 
+          MODIFY COLUMN delivery_type ENUM(
+            'home', 
+            'office', 
+            'pickup_point', 
+            'express', 
+            'standard', 
+            'overnight', 
+            'weekend', 
+            'economy',
+            'les_changes',
+            'stop_desk'
+          ) DEFAULT 'home'
+        `);
+        console.log('✅ Updated delivery_pricing.delivery_type ENUM to include "stop_desk"');
+      }
     }
 
     // Verify the changes
@@ -99,10 +111,10 @@ const addLesChangesDeliveryType = async () => {
     console.log('📋 Updated orders.delivery_type ENUM:', updatedOrdersColumns[0]?.COLUMN_TYPE);
     console.log('📋 Updated delivery_pricing.delivery_type ENUM:', updatedPricingColumns[0]?.COLUMN_TYPE);
 
-    console.log('✅ "les_changes" delivery type migration completed successfully');
+    console.log('✅ "stop_desk" delivery type migration completed successfully');
 
   } catch (error) {
-    console.error('❌ Error adding "les_changes" delivery type:', error);
+    console.error('❌ Error adding "stop_desk" delivery type:', error);
     throw error;
   } finally {
     if (connection) {
@@ -113,7 +125,7 @@ const addLesChangesDeliveryType = async () => {
 
 // Run the migration if called directly
 if (require.main === module) {
-  addLesChangesDeliveryType()
+  addStopDeskDeliveryType()
     .then(() => {
       console.log('🎉 Migration completed successfully');
       process.exit(0);
@@ -124,4 +136,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { addLesChangesDeliveryType };
+module.exports = { addStopDeskDeliveryType };

@@ -33,6 +33,7 @@ import {
   EditOutlined,
   DeleteOutlined,
   SearchOutlined,
+  InfoCircleOutlined,
   DownOutlined ,
   ReloadOutlined,
   UserAddOutlined,
@@ -48,6 +49,7 @@ import {
   SettingOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
+  CalculatorOutlined,
 } from "@ant-design/icons";
 import { orderService } from "../../services/orderService";
 import { userService } from "../../services/userService";
@@ -55,6 +57,7 @@ import orderProductService from "../../services/orderProductService";
 import stockService from "../../services/stockService";
 import variantService from "../../services/variantService";
 import googleAuthService from "../../services/googleAuthService";
+import ecoTrackFeesService from "../../services/ecoTrackFeesService";
 import { useAuth } from "../../contexts/AuthContext";
 import "./OrderManagement.css";
 
@@ -108,6 +111,11 @@ const OrderManagement = () => {
   const [loadingWilayas, setLoadingWilayas] = useState(false);
   const [loadingBaladias, setLoadingBaladias] = useState(false);
   const [loadingDeliveryPrice, setLoadingDeliveryPrice] = useState(false);
+  const [ecotrackStations, setEcotrackStations] = useState([]);
+  const [loadingStations, setLoadingStations] = useState(false);
+  
+  // Delivery type state for conditional rendering
+  const [currentDeliveryType, setCurrentDeliveryType] = useState('home');
   
   // Final total calculation state
   const [finalTotal, setFinalTotal] = useState(0);
@@ -275,7 +283,164 @@ const OrderManagement = () => {
     console.log('💡 Debug functions available:');
     console.log('- window.debugTrackingIds() - Check all tracking IDs');
     console.log('- window.testEcotrackDelete(trackingId, orderId) - Test delete API (orderId optional)');
+    
+    // Debug function to test Total Final calculation
+    window.testTotalFinalCalculation = async (orderId) => {
+      const order = allOrders.find(o => o.id == orderId);
+      if (!order) {
+        console.error('Order not found:', orderId);
+        return;
+      }
+      
+      const productAmount = parseFloat(order.total_amount) || 0;
+      const deliveryPrice = parseFloat(order.delivery_price) || 0;
+      const originalTotal = productAmount + deliveryPrice;
+      const isCorrupted = deliveryPrice === productAmount && deliveryPrice > 0;
+      
+      let correctedTotal = originalTotal;
+      let apiDeliveryPrice = null;
+      
+      if (isCorrupted) {
+        console.log('🔧 Testing corruption correction with EcoTrack API...');
+        
+        // Test the EcoTrack fees API
+        try {
+          const response = await fetch('/api/ecotrack/get-fees', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: JSON.stringify({
+              wilaya_id: order.wilaya_id
+            })
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            console.log('📡 EcoTrack API response:', data);
+            
+            if (data.success && data.fees) {
+              const wilayaKey = order.wilaya_id.toString();
+              const wilayaFees = data.fees[wilayaKey];
+              
+              if (wilayaFees) {
+                // Use the correct tarif based on current form delivery type
+                const currentFormValues = form.getFieldsValue();
+                const deliveryType = currentFormValues.delivery_type || currentDeliveryType || order.delivery_type || 'home';
+                
+                apiDeliveryPrice = deliveryType === 'stop_desk' 
+                  ? (wilayaFees.tarif_stopdesk || wilayaFees.tarif)
+                  : wilayaFees.tarif;
+                  
+                correctedTotal = productAmount + apiDeliveryPrice;
+                console.log(`✅ Found API delivery price for ${deliveryType}: ${apiDeliveryPrice} DA (regular: ${wilayaFees.tarif}, stop_desk: ${wilayaFees.tarif_stopdesk})`);
+              }
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error testing EcoTrack API:', error);
+        }
+        
+        // Fallback - if API failed, don't use hardcoded prices
+        if (!apiDeliveryPrice) {
+          console.log('⚠️ EcoTrack API unavailable - no fallback pricing used (EcoTrack API only)');
+          correctedTotal = productAmount; // No delivery price if API fails
+        }
+      }
+      
+      console.log(`📊 Total Final Calculation Test for Order ${orderId}:`, {
+        order_id: order.id,
+        product_amount: productAmount,
+        original_delivery_price: deliveryPrice,
+        original_total: originalTotal,
+        corruption_detected: isCorrupted,
+        api_delivery_price: apiDeliveryPrice,
+        corrected_total_for_ecotrack: correctedTotal,
+        wilaya_info: `${order.wilaya_id} (${wilayas.find(w => w.id == order.wilaya_id)?.code})`,
+        customer: order.customer_name,
+        savings: isCorrupted ? `Saved ${originalTotal - correctedTotal} DA from corruption` : 'No correction needed'
+      });
+      
+      return { orderId, productAmount, deliveryPrice, originalTotal, correctedTotal, isCorrupted, apiDeliveryPrice };
+    };
+    
+    console.log('- window.testTotalFinalCalculation(orderId) - Test Total Final calculation with EcoTrack API for specific order');
     console.log('- window.debugTrackingStorage() - Analyze tracking ID storage');
+    console.log('- window.testDeliveryPriceCalculation(wilayaId) - Test delivery price calculation');
+    console.log('- window.testDeliveryTypeSwitching(wilayaId) - Test switching between regular and stop desk delivery types');
+
+    // Test delivery price calculation
+    window.testDeliveryPriceCalculation = async (wilayaId) => {
+      console.log('🧪 [DEBUG] Testing delivery price calculation for wilaya:', wilayaId);
+      try {
+        const pricingData = {
+          wilaya_id: wilayaId,
+          delivery_type: "home",
+          weight: 1,
+          pricing_level: "wilaya"
+        };
+        console.log('📡 [DEBUG] Sending request:', pricingData);
+        const response = await orderService.calculateDeliveryPrice(pricingData);
+        console.log('🚚 [DEBUG] Response:', response);
+        
+        if (response.success && response.data) {
+          const price = response.data.price || response.data.delivery_price || 0;
+          console.log('💰 [DEBUG] Extracted price:', price);
+          return price;
+        } else {
+          console.log('❌ [DEBUG] Response not successful');
+          return null;
+        }
+      } catch (error) {
+        console.error('❌ [DEBUG] Error:', error);
+        return null;
+      }
+    };
+
+    // Test delivery type switching
+    window.testDeliveryTypeSwitching = async (wilayaId = 16) => {
+      console.log('🧪 [TEST] Testing delivery type switching for wilaya:', wilayaId);
+      
+      // First set the wilaya
+      form.setFieldsValue({ wilaya_id: wilayaId });
+      handleWilayaChange(wilayaId);
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Test regular delivery
+      console.log('📦 [TEST] Testing regular delivery (home)...');
+      handleDeliveryFieldChange('home', 'delivery_type');
+      
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const regularPrice = form.getFieldValue('delivery_price');
+      console.log('💰 [TEST] Regular delivery price:', regularPrice);
+      
+      // Test stop desk delivery
+      console.log('🚉 [TEST] Testing stop desk delivery...');
+      handleDeliveryFieldChange('stop_desk', 'delivery_type');
+      
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const stopDeskPrice = form.getFieldValue('delivery_price');
+      console.log('💰 [TEST] Stop desk delivery price:', stopDeskPrice);
+      
+      // Compare results
+      console.log('📊 [TEST] Price comparison:', {
+        wilaya_id: wilayaId,
+        regular_price: regularPrice,
+        stop_desk_price: stopDeskPrice,
+        savings: regularPrice - stopDeskPrice,
+        working_correctly: stopDeskPrice < regularPrice
+      });
+      
+      return {
+        wilayaId,
+        regularPrice,
+        stopDeskPrice,
+        savings: regularPrice - stopDeskPrice,
+        workingCorrectly: stopDeskPrice < regularPrice
+      };
+    };
 
     // Enhanced debug function for tracking ID storage analysis
     window.debugTrackingStorage = () => {
@@ -502,16 +667,80 @@ const OrderManagement = () => {
     }
   };
 
+  const fetchEcotrackStations = async () => {
+    console.log('🚉 Starting to fetch EcoTrack stations...');
+    setLoadingStations(true);
+    try {
+      const response = await fetch('/api/ecotrack/stations', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      console.log('🌐 EcoTrack stations API response status:', response.status);
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('📋 EcoTrack stations API result:', result);
+        
+        if (result.success && result.data) {
+          setEcotrackStations(result.data);
+          console.log(`✅ Successfully loaded ${result.data.length} EcoTrack stations`);
+          console.log('📊 Sample stations:', result.data.slice(0, 3));
+        } else {
+          console.warn('❌ EcoTrack stations API returned failure:', result);
+          setEcotrackStations([]);
+          message.warning(`Failed to load EcoTrack stations: ${result.message || 'Unknown error'}`);
+        }
+      } else {
+        const errorText = await response.text();
+        console.warn(`❌ EcoTrack stations API HTTP error ${response.status}:`, errorText);
+        setEcotrackStations([]);
+        
+        if (response.status === 401) {
+          message.error('Authentication failed. Please log in again.');
+        } else if (response.status === 403) {
+          message.error('You do not have permission to access EcoTrack stations.');
+        } else {
+          message.error(`Failed to fetch EcoTrack stations (${response.status}). Please check your connection.`);
+        }
+      }
+    } catch (error) {
+      console.error('💥 Error fetching EcoTrack stations:', error);
+      setEcotrackStations([]);
+      message.error(`Network error while fetching EcoTrack stations: ${error.message}`);
+    } finally {
+      setLoadingStations(false);
+      console.log('🏁 EcoTrack stations fetch completed');
+    }
+  };
+
   const handleWilayaChange = (wilayaId) => {
+    console.log('🏙️ [DEBUG] handleWilayaChange called with wilayaId:', wilayaId);
     setSelectedWilaya(wilayaId);
 
     if (wilayaId) {
+      console.log('🏙️ [DEBUG] Valid wilaya selected, processing...');
+      // Fetch baladias for the selected wilaya
+      fetchBaladias(wilayaId);
+      
+      // Clear the baladia selection when wilaya changes
+      form.setFieldsValue({ baladia_id: undefined, baladia_name: '' });
+      console.log('🧹 [DEBUG] Cleared baladia fields');
+      
       // Calculate delivery price based on wilaya selection only
+      console.log('⏰ [DEBUG] Scheduling delivery price calculation in 100ms...');
       setTimeout(() => {
+        console.log('🚀 [DEBUG] Triggering calculateDeliveryPrice from handleWilayaChange');
         calculateDeliveryPrice();
       }, 100);
       
-      console.log('🚚 Wilaya selected for delivery pricing:', wilayaId);
+      console.log('🚚 [DEBUG] Wilaya selected for delivery pricing:', wilayaId);
+    } else {
+      console.log('❌ [DEBUG] No wilaya selected, clearing related fields');
+      // Clear baladias when no wilaya is selected
+      setBaladias([]);
+      form.setFieldsValue({ baladia_id: undefined, baladia_name: '' });
     }
   };
 
@@ -528,16 +757,60 @@ const OrderManagement = () => {
     console.log('✅ Auto-selected wilaya will trigger Prix de Livraison calculation');
   };
 
+  // Handle baladia selection
+  const handleBaladiaChange = (baladiaId) => {
+    if (baladiaId) {
+      // Find the selected baladia and set its name
+      const selectedBaladia = baladias.find(b => b.id === baladiaId);
+      if (selectedBaladia) {
+        const baladiaName = selectedBaladia.name_en || selectedBaladia.name_fr || selectedBaladia.name_ar;
+        form.setFieldsValue({ 
+          baladia_id: baladiaId,
+          baladia_name: baladiaName 
+        });
+        
+        // Recalculate delivery price with baladia
+        setTimeout(() => {
+          calculateDeliveryPrice();
+        }, 100);
+        
+        console.log('🏘️ Baladia selected:', baladiaName, 'ID:', baladiaId);
+      }
+    } else {
+      form.setFieldsValue({ baladia_id: undefined, baladia_name: '' });
+    }
+  };
+
   const calculateDeliveryPrice = async () => {
     try {
       const formValues = form.getFieldsValue();
       const { wilaya_id, delivery_type, weight } = formValues;
 
-      if (!wilaya_id) return;
+      console.log('🚀 [DEBUG] Starting delivery price calculation...');
+      console.log('🚀 [DEBUG] Form values:', formValues);
+      console.log('🚀 [DEBUG] Wilaya ID:', wilaya_id);
+      console.log('🚀 [DEBUG] Delivery type:', delivery_type);
+      console.log('🚀 [DEBUG] Weight:', weight);
+
+      if (!wilaya_id) {
+        console.log('❌ [DEBUG] No wilaya_id found, aborting calculation');
+        return;
+      }
 
       setLoadingDeliveryPrice(true);
+      console.log('📦 [DEBUG] Calculating delivery price for:', {
+        wilaya_id,
+        delivery_type: delivery_type || "home",
+        weight: weight || 1
+      });
 
-      // Auto-calculate Prix de Livraison based on selected wilaya only
+      // Auto-calculate Prix de Livraison based on selected wilaya using proper API
+      // Skip auto-calculation for "les_changes" delivery type to allow manual entry
+      if (delivery_type === 'les_changes') {
+        console.log('🔄 Les Changes delivery type selected - skipping auto-calculation, allowing manual price entry');
+        return; // Exit early, don't auto-calculate price
+      }
+
       const pricingData = {
         wilaya_id,
         delivery_type: delivery_type || "home",
@@ -545,38 +818,218 @@ const OrderManagement = () => {
         pricing_level: "wilaya" // Always use wilaya-based pricing
       };
 
+      console.log('📡 [DEBUG] Sending API request with data:', pricingData);
       const response = await orderService.calculateDeliveryPrice(pricingData);
+      console.log('🚚 [DEBUG] Delivery price API response:', response);
+      console.log('🚚 [DEBUG] Response success:', response.success);
+      console.log('🚚 [DEBUG] Response data:', response.data);
 
       if (response.success && response.data) {
         // Handle different response formats from the API
-        const deliveryPrice =
-          response.data.delivery_price || response.data.price || 0;
+        const deliveryPrice = response.data.price || response.data.delivery_price || 0;
+        const source = response.data.source || 'unknown';
+        const tarifInfo = response.data.tarif_info || {};
+        
+        console.log('💰 [DEBUG] Extracted delivery price:', deliveryPrice);
+        console.log('🏷️ [DEBUG] Price source:', source);
+        console.log('📦 [DEBUG] Delivery type:', delivery_type);
+        console.log('💡 [DEBUG] Available tariffs:', tarifInfo);
+        
+        if (source === 'ecotrack_official_api') {
+          console.log('📡 [ECOTRACK] Using OFFICIAL EcoTrack API pricing (POST method)');
+          console.log(`🎯 [ECOTRACK] ${delivery_type === 'stop_desk' ? 'Stop Desk' : 'Home Delivery'} price: ${deliveryPrice} DA`);
+          
+          if (tarifInfo.regular && tarifInfo.stop_desk) {
+            console.log(`📊 [ECOTRACK] Tariff comparison for wilaya ${wilaya_id}:`);
+            console.log(`  - Regular (tarif): ${tarifInfo.regular} DA`);
+            console.log(`  - Stop Desk (tarif_stopdesk): ${tarifInfo.stop_desk} DA`);
+            console.log(`  - Selected: ${deliveryPrice} DA (${delivery_type === 'stop_desk' ? 'stop_desk' : 'regular'})`);
+            
+            const savings = delivery_type === 'stop_desk' ? (parseFloat(tarifInfo.regular) - parseFloat(tarifInfo.stop_desk)) : 0;
+            if (savings > 0) {
+              console.log(`💰 [ECOTRACK] Stop desk savings: ${savings} DA`);
+            }
+          }
+        } else {
+          console.log('🏠 [LOCAL] Using local pricing system');
+        }
+        
+        // Use delivery price as received from API without validation
+        console.log('✅ [DEBUG] Using original API delivery price:', deliveryPrice);
+        console.log('📝 [DEBUG] Setting form field delivery_price to:', deliveryPrice);
         form.setFieldsValue({ delivery_price: deliveryPrice });
+        
+        // Verify field was actually set and trigger UI update
+        setTimeout(() => {
+          const currentValue = form.getFieldValue('delivery_price');
+          console.log('🔍 [DEBUG] Form field value after setting:', currentValue);
+          if (currentValue != deliveryPrice) {
+            console.warn('⚠️ [DEBUG] Form field value mismatch! Retrying...');
+            form.setFieldsValue({ delivery_price: deliveryPrice });
+          }
+        }, 25);
         
         // Update final total after delivery price is set
         setTimeout(() => {
+          console.log('📊 [DEBUG] Updating final total...');
           updateFinalTotal();
         }, 100);
         
-        console.log('✅ Prix de Livraison auto-calculated from wilaya:', {
+        console.log('✅ Prix de Livraison auto-calculated from API:', {
           wilaya_id,
           delivery_price: deliveryPrice
         });
+      } else {
+        console.warn('⚠️ API response invalid, using fallback pricing');
+        // Fallback to default pricing if API fails
+        const wilayaCode = wilayas.find(w => w.id == wilaya_id)?.code;
+        const majorCities = ['16', '31', '25', '19', '06', '21', '23'];
+        const fallbackPrice = majorCities.includes(wilayaCode) ? 400 : 600;
+        form.setFieldsValue({ delivery_price: fallbackPrice });
+        setTimeout(() => {
+          updateFinalTotal();
+        }, 100);
       }
     } catch (error) {
       console.error("Error calculating delivery price:", error);
-      message.error(t("delivery.errorCalculatingPrice"));
+      // Fallback pricing on error
+      const formValues = form.getFieldsValue();
+      const wilayaCode = wilayas.find(w => w.id == formValues.wilaya_id)?.code;
+      const majorCities = ['16', '31', '25', '19', '06', '21', '23'];
+      const fallbackPrice = majorCities.includes(wilayaCode) ? 400 : 600;
+      form.setFieldsValue({ delivery_price: fallbackPrice });
+      message.warning(t("delivery.errorCalculatingPrice") + " - Using default pricing");
     } finally {
       setLoadingDeliveryPrice(false);
     }
   };
 
-  const handleDeliveryFieldChange = () => {
-    // Debounce the calculation
-    setTimeout(() => {
-      calculateDeliveryPrice();
-      updateFinalTotal(); // Also update final total when delivery fields change
-    }, 500);
+  const handleDeliveryFieldChange = (value, fieldName) => {
+    // If this is a delivery_type change, explicitly log and ensure it's set
+    if (fieldName === 'delivery_type' && value) {
+      console.log('🚚 Delivery type explicitly changed to:', value);
+      console.log('🎯 Expected prices for delivery type change: tarif (regular) vs tarif_stopdesk (stop_desk)');
+      
+      setCurrentDeliveryType(value); // Update state for conditional rendering
+      form.setFieldsValue({ delivery_type: value });
+      
+      // Clear station code if switching away from stop_desk
+      if (value !== 'stop_desk') {
+        form.setFieldsValue({ ecotrack_station_code: undefined });
+        console.log('🧹 Cleared station code since delivery type is not stop_desk');
+      } else {
+        console.log('🚉 Stop desk selected - station code field will be available');
+      }
+      
+      // For delivery type changes, recalculate immediately with priority
+      console.log('🔄 Triggering immediate delivery price recalculation for type change...');
+      setTimeout(() => {
+        console.log(`� Recalculating delivery price for new type: ${value}`);
+        console.log(`💡 Expected: ${value === 'stop_desk' ? 'tarif_stopdesk (lower price)' : 'tarif (regular price)'}`);
+        calculateDeliveryPrice();
+        updateFinalTotal();
+      }, 50); // Reduced timeout for faster response
+    } else {
+      // For other fields, use normal debounce
+      setTimeout(() => {
+        calculateDeliveryPrice();
+        updateFinalTotal();
+      }, 500);
+    }
+  };
+
+  // Debug function to test EcoTrack fees API integration
+  const testEcoTrackFeesAPI = async () => {
+    try {
+      console.log('🧪 Testing EcoTrack Fees API integration via backend...');
+      message.info('🧪 Testing EcoTrack Fees API...');
+      
+      // Test getting fees data
+      const feesData = await ecoTrackFeesService.getDeliveryFees();
+      console.log('✅ EcoTrack fees data received:', feesData);
+      
+      if (feesData && feesData.tarifs && feesData.tarifs.return) {
+        // Test specific pricing using backend endpoint
+        const algiersRegular = await ecoTrackFeesService.getCachedDeliveryPrice(16, 'home');
+        const algiersStopDesk = await ecoTrackFeesService.getCachedDeliveryPrice(16, 'stop_desk');
+        
+        console.log(`📍 Algiers (16): Regular: ${algiersRegular} DA, Stop Desk: ${algiersStopDesk} DA`);
+        
+        message.success(`✅ EcoTrack API test successful! Algiers: Regular ${algiersRegular} DA, Stop Desk ${algiersStopDesk} DA`);
+      } else {
+        message.error('❌ Invalid EcoTrack API response structure');
+      }
+      
+    } catch (error) {
+      console.error('❌ EcoTrack API test failed:', error);
+      message.error(`❌ EcoTrack API test failed: ${error.message}`);
+    }
+  };
+
+  // Function to recalculate delivery prices for orders with suspicious pricing
+  const handleBulkRecalculateDeliveryPrices = async () => {
+    try {
+      setLoading(true);
+      message.info('🔄 Starting bulk delivery price recalculation using EcoTrack fees API...');
+
+      // Find orders with suspicious delivery prices (delivery price = product price)
+      const suspiciousOrders = allOrders.filter(order => {
+        const productAmount = parseFloat(order.total_amount || 0);
+        const deliveryPrice = parseFloat(order.delivery_price || 0);
+        return Math.abs(deliveryPrice - productAmount) < 0.01 && order.wilaya_id;
+      });
+
+      console.log(`🔍 Found ${suspiciousOrders.length} orders with suspicious delivery prices`);
+
+      if (suspiciousOrders.length === 0) {
+        message.success('✅ No orders found with suspicious delivery prices');
+        return;
+      }
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const order of suspiciousOrders) {
+        try {
+          // Get delivery type (convert from our format to EcoTrack format)
+          const deliveryType = order.delivery_type === 'stop_desk' ? 'stop_desk' : 'home';
+          
+          // Calculate correct delivery price using EcoTrack fees API directly
+          const correctDeliveryPrice = await ecoTrackFeesService.getCachedDeliveryPrice(
+            order.wilaya_id, 
+            deliveryType
+          );
+
+          if (correctDeliveryPrice !== null) {
+            // Update the order with correct delivery price
+            await orderService.updateOrder(order.id, {
+              delivery_price: correctDeliveryPrice
+            });
+
+            console.log(`✅ Updated order ${order.order_number}: ${order.delivery_price} DA → ${correctDeliveryPrice} DA`);
+            successCount++;
+          } else {
+            console.warn(`⚠️ No delivery price found for order ${order.order_number} (wilaya ${order.wilaya_id})`);
+            errorCount++;
+          }
+
+        } catch (error) {
+          console.error(`❌ Failed to update order ${order.order_number}:`, error);
+          errorCount++;
+        }
+      }
+
+      // Refresh orders after bulk update
+      await fetchOrders();
+
+      message.success(`🎉 Bulk recalculation complete using EcoTrack fees API! ✅ ${successCount} orders updated, ❌ ${errorCount} errors`);
+
+    } catch (error) {
+      console.error('Bulk recalculation error:', error);
+      message.error('❌ Failed to perform bulk recalculation');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Load wilayas when component mounts
@@ -584,6 +1037,7 @@ const OrderManagement = () => {
     fetchWilayas();
     fetchProducts();
     fetchLocations();
+    fetchEcotrackStations(); // Load EcoTrack stations
   }, []);
 
   // Update final total when form values change
@@ -594,13 +1048,35 @@ const OrderManagement = () => {
   // Watch for wilaya_id changes and auto-calculate delivery price
   useEffect(() => {
     const wilaya_id = form.getFieldValue('wilaya_id');
+    console.log('🔄 [DEBUG] useEffect triggered for wilaya_id changes');
+    console.log('🔄 [DEBUG] Current wilaya_id from form:', wilaya_id);
     if (wilaya_id) {
-      console.log('🔄 Wilaya detected in form, auto-calculating Prix de Livraison...');
+      console.log('🔄 [DEBUG] Wilaya detected in form, auto-calculating Prix de Livraison...');
       setTimeout(() => {
+        console.log('🚀 [DEBUG] Triggering calculateDeliveryPrice from useEffect');
+        calculateDeliveryPrice();
+      }, 200);
+    } else {
+      console.log('❌ [DEBUG] No wilaya_id in useEffect, skipping calculation');
+    }
+  }, [form.getFieldValue('wilaya_id')]);
+
+  // Watch for delivery_type changes and auto-calculate delivery price
+  useEffect(() => {
+    const delivery_type = form.getFieldValue('delivery_type');
+    const wilaya_id = form.getFieldValue('wilaya_id');
+    console.log('🔄 [DEBUG] useEffect triggered for delivery_type changes');
+    console.log('🔄 [DEBUG] Current delivery_type from form:', delivery_type);
+    console.log('🔄 [DEBUG] Current wilaya_id from form:', wilaya_id);
+    
+    if (wilaya_id && delivery_type) {
+      console.log('🔄 [DEBUG] Both wilaya and delivery type detected, recalculating price...');
+      setTimeout(() => {
+        console.log('🚀 [DEBUG] Triggering calculateDeliveryPrice from delivery_type useEffect');
         calculateDeliveryPrice();
       }, 200);
     }
-  }, [form.getFieldValue('wilaya_id')]);
+  }, [form.getFieldValue('delivery_type')]);
 
   const fetchProducts = async () => {
     try {
@@ -1128,16 +1604,26 @@ const OrderManagement = () => {
   };
 
   const updateFinalTotal = () => {
+    console.log('📊 [DEBUG] updateFinalTotal called');
     // Get current form values
     const formValues = form.getFieldsValue();
+    console.log('📊 [DEBUG] Form values for final total:', formValues);
     const quantity = parseFloat(formValues.product_info?.quantity || 0);
     const unitPrice = parseFloat(formValues.total_amount || 0); // total_amount now represents unit price
     const productTotal = quantity * unitPrice;
     const deliveryPrice = parseFloat(formValues.delivery_price || 0);
     const calculatedFinalTotal = productTotal + deliveryPrice;
     
+    console.log('📊 [DEBUG] Final total calculation:');
+    console.log('  - Quantity:', quantity);
+    console.log('  - Unit Price (total_amount):', unitPrice);
+    console.log('  - Product Total:', productTotal);
+    console.log('  - Delivery Price:', deliveryPrice);
+    console.log('  - Final Total:', calculatedFinalTotal);
+    
     // Update final total state
     setFinalTotal(calculatedFinalTotal);
+    console.log('📊 [DEBUG] Final total state updated to:', calculatedFinalTotal);
   };
 
   // Initialize Google Sheets configuration
@@ -1346,37 +1832,56 @@ const OrderManagement = () => {
 
   const handleCreateOrder = async (values) => {
     try {
-      // Calculate final total
+      console.log('🆕 [DEBUG] handleCreateOrder called with values:', values);
+      
+      // Use delivery price as provided from API/database, no validation
+      let deliveryPrice = parseFloat(values.delivery_price || 0);
       const totalAmount = parseFloat(values.total_amount || 0);
-      const deliveryPrice = parseFloat(values.delivery_price || 0);
+      
+      console.log('💰 [DEBUG] Using original delivery price from API:', deliveryPrice);
+      console.log('💰 [DEBUG] Total amount:', totalAmount);
+      
       const finalTotal = totalAmount + deliveryPrice;
 
       // Transform product_info to product_details JSON string
       const orderData = {
         ...values,
+        delivery_price: deliveryPrice, // Use auto-calculated delivery price
         final_total: finalTotal,
         product_details: values.product_info ? JSON.stringify(values.product_info) : "",
       };
 
       // Remove the nested product_info since we've converted it to product_details
       delete orderData.product_info;
+      
+      console.log('📝 Creating order with validated data:', {
+        total_amount: totalAmount,
+        delivery_price: deliveryPrice,
+        final_total: finalTotal,
+        wilaya_id: values.wilaya_id
+      });
 
       await orderService.createOrder(orderData);
       message.success(t("orders.createSuccess"));
       setModalVisible(false);
+      setCurrentDeliveryType('home'); // Reset delivery type state
       form.resetFields();
       fetchOrders();
       fetchOrdersWithProducts(); // Refresh product data too
     } catch (error) {
+      console.error('Order creation error:', error);
       message.error(t("orders.createError"));
     }
   };
 
   const handleUpdateOrder = async (values) => {
     try {
-      // Calculate final total
+      // Use delivery price as provided from API/database, no validation  
+      let deliveryPrice = parseFloat(values.delivery_price || 0);
       const totalAmount = parseFloat(values.total_amount || 0);
-      const deliveryPrice = parseFloat(values.delivery_price || 0);
+      
+      console.log('� [DEBUG] Using original delivery price from API:', deliveryPrice);
+      
       const finalTotal = totalAmount + deliveryPrice;
 
       // Update notes with current variant information from form
@@ -1418,6 +1923,7 @@ const OrderManagement = () => {
       // Transform product_info to product_details JSON string
       const orderData = {
         ...values,
+        delivery_price: deliveryPrice, // Use auto-calculated delivery price
         notes: updatedNotes, // Use updated notes with current variant info
         final_total: finalTotal,
         product_details: values.product_info ? JSON.stringify(values.product_info) : "",
@@ -1425,15 +1931,24 @@ const OrderManagement = () => {
 
       // Remove the nested product_info since we've converted it to product_details
       delete orderData.product_info;
+      
+      console.log('📝 Updating order with validated data:', {
+        total_amount: totalAmount,
+        delivery_price: deliveryPrice,
+        final_total: finalTotal,
+        wilaya_id: values.wilaya_id
+      });
 
       await orderService.updateOrder(editingOrder.id, orderData);
       message.success(t("orders.updateSuccess"));
       setModalVisible(false);
       setEditingOrder(null);
+      setCurrentDeliveryType('home'); // Reset delivery type state
       form.resetFields();
       fetchOrders();
       fetchOrdersWithProducts(); // Refresh product data too
     } catch (error) {
+      console.error('Order update error:', error);
       message.error(t("orders.updateError"));
     }
   };
@@ -1793,7 +2308,10 @@ const OrderManagement = () => {
             adresse: order.customer_address || order.address || 'Adresse non spécifiée',
             wilaya_id: order.wilaya_id || 16, // Default to Algiers if not set
             commune: validateCommuneForEcotrack(order.baladia_name || order.customer_city || ''),
-            montant: parseFloat(order.total_amount) || 0,
+            montant: calculateCorrectTotalFinal(order), // Use frontend Total calculation
+            total_amount: order.total_amount, // Send individual amounts for backend calculation
+            delivery_price: order.delivery_price,
+            product_details: order.product_details, // Include full product details for variant extraction
             remarque: order.notes || order.remarks || '',
             produit: order.product_details ? 
               (typeof order.product_details === 'string' ? 
@@ -1801,10 +2319,88 @@ const OrderManagement = () => {
                 order.product_details.name) || 'Produit' : 'Produit',
             type_id: 1, // Standard delivery
             poids: 1, // Default weight
-            stop_desk: 0, // Home delivery
+            stop_desk: 1, // Stop desk delivery (updated as requested)
+            station_code: order.ecotrack_station_code || '', // Use selected station code
             stock: 0,
             can_open: 0
           };
+          
+          console.log(`💰 EcoTrack Total Final Amount Calculation for Order ${order.id}:`, {
+            original_product_amount: parseFloat(order.total_amount) || 0,
+            original_delivery_price: parseFloat(order.delivery_price) || 0,
+            original_total_would_be: (parseFloat(order.total_amount) || 0) + (parseFloat(order.delivery_price) || 0),
+            corrected_total_final_sent: ecotrackData.montant,
+            corruption_detected: (parseFloat(order.delivery_price) || 0) === (parseFloat(order.total_amount) || 0),
+            product_details_available: !!order.product_details,
+            verification: `Sending ${ecotrackData.montant} DA to EcoTrack`,
+            product_details_summary: order.product_details ? 
+              (() => {
+                try {
+                  const pd = typeof order.product_details === 'string' ? JSON.parse(order.product_details) : order.product_details;
+                  return {
+                    name: pd.name,
+                    unit_price: pd.unit_price,
+                    quantity: pd.quantity,
+                    variant: pd.variant || pd.variante || pd.size || pd.color || 'none'
+                  };
+                } catch (e) {
+                  return 'parsing_error';
+                }
+              })() : 'no_product_details'
+          });
+          
+          // Calculate correct Total Final for EcoTrack - only fix obvious corruption
+          // Simple function to calculate total for EcoTrack (same logic as Total column)
+          function calculateCorrectTotalFinal(order) {
+            console.log(`� [ECOTRACK] Calculating total for order ${order.order_number || order.id}...`);
+            
+            // Check if we have a pre-calculated final_total from the edit form
+            const storedFinalTotal = parseFloat(order.final_total || 0);
+            
+            if (storedFinalTotal > 0) {
+              console.log(`� [ECOTRACK] Using stored final_total: ${storedFinalTotal} DA`);
+              return storedFinalTotal;
+            }
+            
+            // Extract quantity and calculate product total (same logic as Total column)
+            let quantity = 1;
+            let unitPrice = 0;
+            let productTotal = 0;
+            
+            if (order.product_details) {
+              try {
+                const details = typeof order.product_details === 'string' 
+                  ? JSON.parse(order.product_details) 
+                  : order.product_details;
+                quantity = parseFloat(details.quantity || 1);
+                
+                // If we have unit price in product details, use it
+                if (details.unit_price) {
+                  unitPrice = parseFloat(details.unit_price);
+                  productTotal = unitPrice * quantity;
+                  console.log(`📊 [ECOTRACK] Using unit_price from product_details: ${unitPrice} DA × ${quantity} = ${productTotal} DA`);
+                }
+              } catch (e) {
+                console.log(`⚠️ [ECOTRACK] Failed to parse product_details for order ${order.id}`);
+                quantity = 1;
+              }
+            }
+            
+            // If we don't have unit price from product details, treat total_amount as unit price
+            if (unitPrice === 0) {
+              unitPrice = parseFloat(order.total_amount || 0);
+              productTotal = unitPrice * quantity;
+              console.log(`� [ECOTRACK] Using total_amount as unit price: ${unitPrice} DA × ${quantity} = ${productTotal} DA`);
+            }
+            
+            // Add delivery price
+            const deliveryPrice = parseFloat(order.delivery_price || 0);
+            const finalTotal = productTotal + deliveryPrice;
+            
+            console.log(`📊 [ECOTRACK] Final calculation: ${productTotal} DA (product) + ${deliveryPrice} DA (delivery) = ${finalTotal} DA`);
+            
+            return finalTotal;
+          }
           
           // Function to validate commune for EcoTrack
           function validateCommuneForEcotrack(communeName) {
@@ -1881,8 +2477,15 @@ const OrderManagement = () => {
             adresse: ecotrackData.adresse,
             wilaya_id: ecotrackData.wilaya_id,
             commune: ecotrackData.commune || '(empty)',
-            montant: ecotrackData.montant,
+            montant: ecotrackData.montant, // This is the frontend-calculated Total Final
             produit: ecotrackData.produit
+          });
+          
+          console.log(`💰 Frontend Total Final Calculation:`, {
+            product_amount: parseFloat(order.total_amount) || 0,
+            delivery_price: parseFloat(order.delivery_price) || 0,
+            total_final: ecotrackData.montant,
+            note: 'This Total Final will be sent to backend and used directly'
           });
 
           // Create delivery in EcoTrack via backend API
@@ -2377,6 +2980,163 @@ const OrderManagement = () => {
       responsive: ["sm"],
       render: (amount) => <Text strong>{`${amount || 0} DA`}</Text>,
     },
+//     {
+//       title: "Total",
+//       key: "calculated_total",
+//       width: 120,
+//       responsive: ["sm"],
+//       render: (_, record) => {
+//         // Create a component for each cell to handle async API calls
+//         const TotalCell = () => {
+//           const [apiDeliveryPrice, setApiDeliveryPrice] = useState(null);
+//           const [loading, setLoading] = useState(false);
+          
+//           // Extract quantity and unit price from product_details
+//           let quantity = 1;
+//           let unitPrice = 0;
+//           let productTotal = 0;
+          
+//           // Check if we have a pre-calculated final_total from the edit form
+//           const storedFinalTotal = parseFloat(record.final_total || 0);
+          
+//           if (record.product_details) {
+//             try {
+//               const details = typeof record.product_details === 'string' 
+//                 ? JSON.parse(record.product_details) 
+//                 : record.product_details;
+//               quantity = parseFloat(details.quantity || 1);
+              
+//               // If we have unit price in product details, use it
+//               if (details.unit_price) {
+//                 unitPrice = parseFloat(details.unit_price);
+//                 productTotal = unitPrice * quantity;
+//                 console.log(`📊 Using unit_price from product_details: ${unitPrice} DA × ${quantity} = ${productTotal} DA`);
+//               }
+//             } catch (e) {
+//               // If parsing fails, use defaults
+//               quantity = 1;
+//             }
+//           }
+          
+//           // If we don't have unit price from product details, treat total_amount as unit price
+//           if (unitPrice === 0) {
+//             unitPrice = parseFloat(record.total_amount || 0);
+//             productTotal = unitPrice * quantity;
+//             console.log(`📊 Using total_amount as unit price: ${unitPrice} DA × ${quantity} = ${productTotal} DA`);
+//           }
+          
+//           // Check if delivery price seems incorrect (same as product amount)
+//           const storedDeliveryPrice = parseFloat(record.delivery_price || 0);
+//           const deliveryPriceSeemsSuspicious = Math.abs(storedDeliveryPrice - productTotal) < 0.01;
+          
+//           // Auto-fetch correct delivery price if suspicious and we have required data
+//           useEffect(() => {
+//             const fetchCorrectDeliveryPrice = async () => {
+//               if (deliveryPriceSeemsSuspicious && record.wilaya_id && !loading && apiDeliveryPrice === null) {
+//                 setLoading(true);
+//                 try {
+//                   console.log(`🔄 Auto-fetching delivery price from EcoTrack fees API for order ${record.order_number}...`);
+                  
+//                   // Get delivery type (convert from our format to EcoTrack format)
+//                   const deliveryType = record.delivery_type === 'stop_desk' ? 'stop_desk' : 'home';
+                  
+//                   // Call EcoTrack fees API directly
+//                   const correctDeliveryPrice = await ecoTrackFeesService.getCachedDeliveryPrice(
+//                     record.wilaya_id, 
+//                     deliveryType
+//                   );
+                  
+//                   if (correctDeliveryPrice !== null) {
+//                     console.log(`✅ Got correct delivery price for ${record.order_number}: ${correctDeliveryPrice} DA (was ${storedDeliveryPrice} DA)`);
+//                     setApiDeliveryPrice(correctDeliveryPrice);
+//                   } else {
+//                     console.warn(`⚠️ No delivery price found for order ${record.order_number}, using stored price`);
+//                     setApiDeliveryPrice(storedDeliveryPrice); // Fallback to stored price
+//                   }
+                  
+//                 } catch (error) {
+//                   console.error(`❌ Failed to fetch delivery price from EcoTrack fees API for order ${record.order_number}:`, error);
+//                   setApiDeliveryPrice(storedDeliveryPrice); // Fallback to stored price
+//                 } finally {
+//                   setLoading(false);
+//                 }
+//               } else if (!deliveryPriceSeemsSuspicious) {
+//                 // Use stored price if it seems correct
+//                 setApiDeliveryPrice(storedDeliveryPrice);
+//               }
+//             };
+            
+//             fetchCorrectDeliveryPrice();
+//           }, [record.order_number, deliveryPriceSeemsSuspicious, record.wilaya_id]);
+          
+//           // Use API delivery price if available, otherwise use stored price
+//           const deliveryPrice = apiDeliveryPrice !== null ? apiDeliveryPrice : storedDeliveryPrice;
+          
+//           // Use stored final_total if available (from edit form), otherwise calculate it
+//           let finalTotal;
+//           let isUsingStoredTotal = false;
+          
+//           if (storedFinalTotal > 0) {
+//             // Use the pre-calculated final_total from edit form
+//             finalTotal = storedFinalTotal;
+//             isUsingStoredTotal = true;
+//             console.log(`📊 Using stored final_total for order ${record.order_number}: ${finalTotal} DA`);
+//             console.log(`🔍 isUsingStoredTotal = ${isUsingStoredTotal}, should show 📝 icon`);
+//           } else {
+//             // Calculate total: product + delivery
+//             finalTotal = productTotal + deliveryPrice;
+//             console.log(`📊 Calculated total for order ${record.order_number}: ${productTotal} + ${deliveryPrice} = ${finalTotal} DA`);
+//             console.log(`🔍 isUsingStoredTotal = ${isUsingStoredTotal}, no 📝 icon`);
+//           }
+          
+//           // Create detailed tooltip showing the breakdown
+//           const wasRecalculated = deliveryPriceSeemsSuspicious && apiDeliveryPrice !== null && apiDeliveryPrice !== storedDeliveryPrice;
+          
+//           // Show different tooltip formats based on whether we have quantity info and stored total
+//           let tooltipContent;
+//           if (isUsingStoredTotal) {
+//             tooltipContent = `💰 EDIT FORM TOTAL: ${finalTotal.toFixed(2)} DA
+// 📝 This total was set manually in the edit form
+// 📊 Calculated would be: ${productTotal.toFixed(2)} DA (product) + ${deliveryPrice.toFixed(2)} DA (delivery) = ${(productTotal + deliveryPrice).toFixed(2)} DA${wasRecalculated ? '\n✅ Delivery updated via EcoTrack: ' + storedDeliveryPrice.toFixed(2) + ' DA → ' + apiDeliveryPrice.toFixed(2) + ' DA' : ''}`;
+//           } else if (quantity > 1) {
+//             tooltipContent = `Product: ${unitPrice.toFixed(2)} DA × ${quantity} = ${productTotal.toFixed(2)} DA
+// Delivery: ${deliveryPrice.toFixed(2)} DA ${wasRecalculated ? '(EcoTrack Fees API)' : loading ? '(Checking EcoTrack...)' : '(stored)'}
+// Total: ${finalTotal.toFixed(2)} DA${wasRecalculated ? '\n✅ Fixed via EcoTrack: ' + storedDeliveryPrice.toFixed(2) + ' DA → ' + apiDeliveryPrice.toFixed(2) + ' DA' : ''}`;
+//           } else {
+//             tooltipContent = `Product: ${productTotal.toFixed(2)} DA
+// Delivery: ${deliveryPrice.toFixed(2)} DA ${wasRecalculated ? '(EcoTrack Fees API)' : loading ? '(Checking EcoTrack...)' : '(stored)'}
+// Total: ${finalTotal.toFixed(2)} DA${wasRecalculated ? '\n✅ Fixed via EcoTrack: ' + storedDeliveryPrice.toFixed(2) + ' DA → ' + apiDeliveryPrice.toFixed(2) + ' DA' : ''}`;
+//           }
+//           if (loading) {
+//             return (
+//               <Tooltip title="Fetching correct delivery price from EcoTrack fees API...">
+//                 <Text style={{ color: '#1890ff' }}>
+//                   <Spin size="small" style={{ marginRight: 4 }} />
+//                   {`${(isUsingStoredTotal ? storedFinalTotal : productTotal + storedDeliveryPrice).toFixed(2)} DA`}
+//                 </Text>
+//               </Tooltip>
+//             );
+//           }
+          
+//           return (
+//             <Tooltip title={tooltipContent}>
+//               <Text strong style={{ 
+//                 color: isUsingStoredTotal ? '#722ed1' : (wasRecalculated ? '#52c41a' : '#1890ff') // Purple for stored, green if auto-corrected, blue otherwise
+//               }}>
+//                 {`${finalTotal.toFixed(2)} DA`}
+//                 {(() => {
+//                   console.log(`🎨 Rendering order ${record.order_number}: isUsingStoredTotal=${isUsingStoredTotal}, should show 📝=${isUsingStoredTotal}`);
+//                   return isUsingStoredTotal && <span style={{ marginLeft: 4 }}>📝</span>;
+//                 })()}
+//                 {wasRecalculated && <span style={{ marginLeft: 4 }}>✅</span>}
+//               </Text>
+//             </Tooltip>
+//           );
+//         };
+        
+//         return <TotalCell />;
+//       },
+//     },
     {
       title: t("orders.boutique"),
       key: "boutique",
@@ -2709,11 +3469,80 @@ const OrderManagement = () => {
                   notes: combinedNotes
                 });
                 
+                // Ensure delivery_price is properly set
+                const deliveryPrice = parseFloat(record.delivery_price || 0);
+                const totalAmount = parseFloat(record.total_amount || 0);
+                
+                console.log('🔧 [DEBUG] Setting form with delivery_price:', deliveryPrice);
+                
+                console.log('� [DEBUG] Using original delivery_price from database:', deliveryPrice);
+                
                 form.setFieldsValue({
                   ...record,
                   product_info: productInfo,
                   notes: combinedNotes, // Use combined notes with Excel variant info
+                  delivery_price: deliveryPrice // Explicitly set delivery price
                 });
+                
+                // Set current delivery type for conditional rendering
+                setCurrentDeliveryType(record.delivery_type || 'home');
+                
+                console.log('✅ [DEBUG] Form populated with delivery_price:', deliveryPrice);
+                console.log('✅ [DEBUG] Current delivery type set to:', record.delivery_type || 'home');
+                
+                // Force recalculation of delivery price after form is set
+                setTimeout(() => {
+                  console.log('🔄 [DEBUG] Force recalculating delivery price after form initialization');
+                  calculateDeliveryPrice();
+                }, 300);
+                
+                // After form is set, try to get more precise price from API if needed
+                if (record.wilaya_id) {
+                  setTimeout(async () => {
+                    try {
+                      const pricingData = {
+                        wilaya_id: record.wilaya_id,
+                        delivery_type: record.delivery_type || "home", // Use actual delivery type
+                        weight: 1,
+                        pricing_level: "wilaya"
+                      };
+                      
+                      console.log('📡 [DEBUG] Getting precise API price with correct delivery type:', pricingData);
+                      const response = await orderService.calculateDeliveryPrice(pricingData);
+                      
+                      if (response.success && response.data) {
+                        const apiPrice = response.data.price || response.data.delivery_price || 0;
+                        const currentPrice = parseFloat(form.getFieldValue('delivery_price') || 0);
+                        
+                        if (apiPrice >= 50 && apiPrice <= 1600 && apiPrice !== currentPrice) {
+                          console.log('🎯 [DEBUG] Updating with precise API price:', apiPrice);
+                          form.setFieldsValue({ delivery_price: apiPrice });
+                          message.success(`Prix mis à jour via API: ${apiPrice} DA`);
+                        }
+                      }
+                    } catch (error) {
+                      console.error('❌ [DEBUG] API call failed:', error);
+                    }
+                  }, 1000);
+                }
+                
+                // Load baladias if order has a wilaya
+                if (record.wilaya_id) {
+                  handleAutoWilayaSelection(record.wilaya_id);
+                  
+                  // If order has baladia_id, load baladias for that wilaya
+                  if (record.baladia_id) {
+                    fetchBaladias(record.wilaya_id).then(() => {
+                      // Set the baladia after baladias are loaded
+                      setTimeout(() => {
+                        form.setFieldsValue({ 
+                          baladia_id: record.baladia_id,
+                          baladia_name: record.baladia_name 
+                        });
+                      }, 100);
+                    });
+                  }
+                }
                 
                 // Force a form update to trigger re-render
                 setTimeout(() => {
@@ -2806,15 +3635,6 @@ const OrderManagement = () => {
       ),
     },
   ];
-
-  // Get paginated data from filtered orders
-  const getPaginatedOrders = () => {
-    const startIndex = (pagination.current - 1) * pagination.pageSize;
-    const endIndex = startIndex + pagination.pageSize;
-    return filteredOrders.slice(startIndex, endIndex);
-  };
-
-  const paginatedOrders = getPaginatedOrders();
 
   return (
     <div className="orders-page">
@@ -3106,6 +3926,20 @@ const OrderManagement = () => {
                     icon: <ReloadOutlined />,
                     onClick: fetchOrders,
                   },
+                  {
+                    key: 'test-ecotrack',
+                    label: 'Test EcoTrack API',
+                    icon: <GlobalOutlined />,
+                    onClick: testEcoTrackFeesAPI,
+                    disabled: loading,
+                  },
+                  {
+                    key: 'recalculate-delivery',
+                    label: 'Fix Delivery Prices',
+                    icon: <CalculatorOutlined />,
+                    onClick: handleBulkRecalculateDeliveryPrices,
+                    disabled: loading,
+                  },
                 ],
               }}
               placement="bottomRight"
@@ -3123,7 +3957,10 @@ const OrderManagement = () => {
       <Card>
         <Table
           columns={columns}
-          dataSource={paginatedOrders}
+          dataSource={filteredOrders.slice(
+            (pagination.current - 1) * pagination.pageSize,
+            pagination.current * pagination.pageSize
+          )}
           rowKey="id"
           loading={loading}
           size="small"
@@ -3147,7 +3984,7 @@ const OrderManagement = () => {
               setPagination({ ...pagination, current: page, pageSize });
             },
           }}
-          scroll={{ x: 1200, y: 600 }}
+          scroll={{ x: 1200 }}
         />
       </Card>
 
@@ -3158,6 +3995,7 @@ const OrderManagement = () => {
         onCancel={() => {
           setModalVisible(false);
           setEditingOrder(null);
+          setCurrentDeliveryType('home'); // Reset delivery type state
           form.resetFields();
         }}
         footer={null}
@@ -3167,6 +4005,16 @@ const OrderManagement = () => {
           form={form}
           layout="vertical"
           onFinish={editingOrder ? handleUpdateOrder : handleCreateOrder}
+          onValuesChange={(changedValues, allValues) => {
+            // Debug: Log form value changes
+            if (changedValues.delivery_type) {
+              console.log('🚚 Delivery type changed:', changedValues.delivery_type);
+            }
+            // Ensure form values are properly stored
+            if (Object.keys(changedValues).length > 0) {
+              console.log('📝 Form values changed:', changedValues);
+            }
+          }}
         >
           <Row gutter={16}>
             <Col span={12}>
@@ -3239,20 +4087,36 @@ const OrderManagement = () => {
                 </Form.Item>
               </Col>
               <Col span={6}>
+                {/* Keep baladia_name for compatibility */}
+                <Form.Item name="baladia_name" hidden>
+                  <Input />
+                </Form.Item>
+                
                 <Form.Item
-                  name="baladia_name"
+                  name="baladia_id"
                   label={t("delivery.baladia")}
                 >
-                  <Input
-                    placeholder={t("delivery.baladiaFromExcel")}
-                    prefix=""
-                    disabled
-                    style={{ 
-                      backgroundColor: '#f0f9ff',
-                      borderColor: '#3b82f6',
-                      color: '#1e40af'
-                    }}
-                  />
+                  <Select
+                    placeholder="Select Baladia"
+                    showSearch
+                    optionFilterProp="children"
+                    onChange={handleBaladiaChange}
+                    loading={loadingBaladias}
+                    allowClear
+                    disabled={!selectedWilaya}
+                    filterOption={(input, option) =>
+                      option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                    }
+                  >
+                    {baladias.map((baladia) => {
+                      const name = baladia.name_en || baladia.name_fr || baladia.name_ar;
+                      return (
+                        <Option key={baladia.id} value={baladia.id}>
+                          {name}
+                        </Option>
+                      );
+                    })}
+                  </Select>
                 </Form.Item>
               </Col>
               <Col span={6}>
@@ -3269,16 +4133,13 @@ const OrderManagement = () => {
                 >
                   <Select 
                     placeholder={t("delivery.selectType")}
-                    onChange={handleDeliveryFieldChange}
+                    onChange={(value) => handleDeliveryFieldChange(value, 'delivery_type')}
                   >
                     <Option value="home">
-                       {t("delivery.types.home")}
+                       {t("delivery.types.home")} (À domicile)
                     </Option>
-                    <Option value="office">
-                       {t("delivery.types.office")}
-                    </Option>
-                    <Option value="pickup_point">
-                       {t("delivery.types.pickup_point")}
+                    <Option value="stop_desk">
+                       Stop Desk (Point de collecte)
                     </Option>
                     <Option value="les_changes">
                        les changes
@@ -3286,17 +4147,102 @@ const OrderManagement = () => {
                   </Select>
                 </Form.Item>
               </Col>
+              
+              {/* Show helpful message for les_changes delivery type */}
+              {currentDeliveryType === 'les_changes' && (
+                <Col span={24}>
+                  <Alert
+                    message="Mode manuel activé pour Les Changes"
+                    description="Veuillez saisir manuellement le prix de livraison dans le champ 'Prix de Livraison'. L'auto-calcul est désactivé pour ce type de livraison."
+                    type="info"
+                    showIcon
+                    style={{ margin: '8px 0' }}
+                  />
+                </Col>
+              )}
+              
+              <Col span={6}>
+                <Form.Item
+                  name="ecotrack_station_code"
+                  label="EcoTrack Station"
+                  tooltip="Required for stop desk delivery in EcoTrack"
+                  style={{ 
+                    display: currentDeliveryType === 'stop_desk' ? 'block' : 'none' 
+                  }}
+                  rules={[
+                    {
+                      required: currentDeliveryType === 'stop_desk',
+                      message: 'Station code is required for stop desk delivery'
+                    }
+                  ]}
+                >
+                  <Select 
+                    placeholder={`Select EcoTrack station (${ecotrackStations.length} available)`}
+                    loading={loadingStations}
+                    showSearch
+                    optionFilterProp="children"
+                    filterOption={(input, option) => {
+                      const children = option.children;
+                      if (typeof children === 'string') {
+                        return children.toLowerCase().includes(input.toLowerCase());
+                      }
+                      // Handle cases where children might be a React element or other type
+                      const childrenStr = String(children || '');
+                      return childrenStr.toLowerCase().includes(input.toLowerCase());
+                    }}
+                    onDropdownVisibleChange={(open) => {
+                      if (open) {
+                        console.log('🚉 Station dropdown opened, stations:', ecotrackStations);
+                      }
+                    }}
+                    notFoundContent={loadingStations ? "Loading stations..." : `No stations found (${ecotrackStations.length} loaded)`}
+                  >
+                    {ecotrackStations.map((station) => (
+                      <Option key={station.code} value={station.code}>
+                        {station.code} - {station.name}
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              </Col>
               <Col span={6}>
                 <Form.Item
                   name="delivery_price"
-                  label={t("delivery.deliveryPrice")}
-                >
+                  label={
+                    <span>
+                      {t("delivery.deliveryPrice")}
+                      {currentDeliveryType === 'les_changes' && (
+                        <span style={{ color: '#52c41a', marginLeft: 4 }}>
+                          ✏️ Manual
+                        </span>
+                      )}
+                    </span>
+                  }
+                  rules={[
+                    // No validation - accept delivery price as provided from API
+                  ]}>
                   <Input
                     type="number"
                     suffix="DA"
-                    placeholder="0"
+                    placeholder={
+                      currentDeliveryType === 'les_changes' 
+                        ? "Entrez le prix manuellement" 
+                        : "Prix depuis API/Base de données"
+                    }
+                    style={{
+                      backgroundColor: currentDeliveryType === 'les_changes' ? '#f6ffed' : undefined,
+                      borderColor: currentDeliveryType === 'les_changes' ? '#52c41a' : undefined
+                    }}
                     min={0}
-                    onChange={handleDeliveryFieldChange}
+                    disabled={false} // Always enabled, but visual feedback for manual entry
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      console.log('🚚 Changement manuel du prix de livraison:', value);
+                      if (currentDeliveryType === 'les_changes') {
+                        console.log('🔄 Les Changes: Manual delivery price entry enabled');
+                      }
+                      handleDeliveryFieldChange(value, 'delivery_price');
+                    }}
                   />
                 </Form.Item>
               </Col>
@@ -3465,7 +4411,7 @@ const OrderManagement = () => {
                     >
                       <Input 
                         placeholder={t("orders.enterProductName")} 
-                        disabled={selectedProduct}
+                        style={{ backgroundColor: selectedProduct ? '#f6ffed' : undefined }}
                       />
                     </Form.Item>
                   </Col>
@@ -3510,7 +4456,7 @@ const OrderManagement = () => {
                     >
                       <Input 
                         placeholder={t("orders.enterProductCategory")}
-                        disabled={selectedProduct}
+                        style={{ backgroundColor: selectedProduct ? '#f6ffed' : undefined }}
                         prefix="🏷️"
                       />
                     </Form.Item>

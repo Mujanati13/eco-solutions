@@ -763,15 +763,32 @@ class EnhancedExcelProcessor {
       });
       
       const fileName = fileMetadata.data.name;
-      console.log(`📁 Processing file: ${fileName}`);
+      const mimeType = fileMetadata.data.mimeType;
+      console.log(`📁 Processing file: ${fileName} (${mimeType})`);
       
-      // Download file content
-      const response = await drive.files.get({
-        fileId: spreadsheetId,
-        alt: 'media'
-      });
+      let fileBuffer;
       
-      const fileBuffer = Buffer.from(response.data, 'binary');
+      // Handle Google Sheets vs Excel files differently
+      if (mimeType === 'application/vnd.google-apps.spreadsheet') {
+        console.log('📊 Detected Google Sheets file, exporting as Excel...');
+        // Export Google Sheets as Excel format
+        const response = await drive.files.export({
+          fileId: spreadsheetId,
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+        fileBuffer = Buffer.from(response.data, 'binary');
+      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
+                 mimeType === 'application/vnd.ms-excel') {
+        console.log('📊 Detected Excel file, downloading directly...');
+        // Download Excel files directly
+        const response = await drive.files.get({
+          fileId: spreadsheetId,
+          alt: 'media'
+        });
+        fileBuffer = Buffer.from(response.data, 'binary');
+      } else {
+        throw new Error(`Unsupported file type: ${mimeType}. Only Google Sheets and Excel files are supported.`);
+      }
       
       // Parse with source tracking information
       const parseOptions = {

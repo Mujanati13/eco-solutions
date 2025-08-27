@@ -231,7 +231,7 @@ const Categories = () => {
       render: (value) => (
         <Tag 
           color={parseFloat(value) > 0 ? 'gold' : 'default'} 
-          icon={<DollarOutlined />}
+          // icon={<DollarOutlined />}
           size="small"
         >
           {parseFloat(value || 0).toFixed(2)}

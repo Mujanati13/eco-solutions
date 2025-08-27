@@ -348,23 +348,11 @@ class AutoGoogleSheetsImporter {
         }
       }
 
-      // Check if this is a duplicate file by content hash
-      if (fileHash && await this.isDuplicateFile(fileHash, fileName)) {
-        console.log(`⏭️ Skipping duplicate file: ${fileName}`);
-        await this.markFileAsProcessed(spreadsheetId, fileName, modifiedTime, 0, fileHash, size, 'completed', 'Duplicate file skipped');
-        return;
-      }
-
-      // Check if file was already processed and hasn't been modified
-      const isNewOrModified = await this.isFileNewOrModified(spreadsheetId, modifiedTime, fileContent);
-      if (!isNewOrModified) {
-        console.log(`⏭️  Skipping: ${fileName} (already processed and not modified)`);
-        await pool.query(
-          'UPDATE google_sheets_processed SET processing_status = ? WHERE spreadsheet_id = ?',
-          ['completed', spreadsheetId]
-        );
-        return;
-      }
+      // Always re-scan files that match patterns - we'll check for duplicate orders later
+      console.log(`🔄 Re-scanning file: ${fileName} (checking for new orders)`);
+      
+      // Update processing status
+      await this.updateFileProcessingStatus(spreadsheetId, fileName, modifiedTime, fileHash, size, 'processing');
 
       let importResult = { success: false, imported: 0, orders: [] };
       let totalOrdersFromFile = 0;
@@ -559,6 +547,28 @@ class AutoGoogleSheetsImporter {
     } catch (error) {
       console.error('❌ Error checking file status:', error);
       return true; // Process on error to be safe
+    }
+  }
+
+  async updateFileProcessingStatus(spreadsheetId, fileName, modifiedTime, fileHash = null, fileSize = 0, status = 'processing') {
+    try {
+      // Insert or update file processing status
+      await pool.query(`
+        INSERT INTO google_sheets_processed 
+        (spreadsheet_id, file_name, last_modified, file_hash, file_size, processing_status)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE 
+        file_name = VALUES(file_name),
+        last_modified = VALUES(last_modified),
+        file_hash = VALUES(file_hash),
+        file_size = VALUES(file_size),
+        processing_status = VALUES(processing_status),
+        last_processed = NOW()
+      `, [spreadsheetId, fileName, modifiedTime, fileHash, fileSize, status]);
+      
+      console.log(`📝 Updated processing status for ${fileName}: ${status}`);
+    } catch (error) {
+      console.error('Error updating file processing status:', error);
     }
   }
 

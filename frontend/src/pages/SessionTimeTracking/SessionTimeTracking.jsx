@@ -46,7 +46,7 @@ const SessionTimeTracking = () => {
   const [selectedDate, setSelectedDate] = useState(null);
   const [summary, setSummary] = useState(null);
   const [activeSessions, setActiveSessions] = useState([]);
-  const [viewType, setViewType] = useState("summary"); // 'summary', 'detailed', 'active'
+  const [viewType, setViewType] = useState("active"); // 'summary', 'detailed', 'active'
   const [groupBy, setGroupBy] = useState("none"); // 'none', 'day', 'month', 'year'
   // Local state for current session duration (only for this component)
   const [localSessionDuration, setLocalSessionDuration] = useState(0);
@@ -729,7 +729,6 @@ const SessionTimeTracking = () => {
                 onChange={setViewType}
               >
                 <Option value="summary">{t("sessionTime.summary")}</Option>
-                <Option value="detailed">{t("sessionTime.detailed")}</Option>
                 <Option value="active">
                   {t("sessionTime.activeSessions")}
                 </Option>

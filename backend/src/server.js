@@ -29,6 +29,7 @@ const variantsRoutes = require('./routes/variants');
 const googleAuthRoutes = require('./routes/googleAuth');
 const deliveryPricingRoutes = require('./routes/delivery-pricing');
 const orderProductRoutes = require('./routes/orderProduct');
+const ecotrackFeesRoutes = require('./routes/ecotrackFees');
 const ecotrackRoutes = require('./routes/ecotrack');
 const ecotrackMultiAccountRoutes = require('./routes/ecotrackMultiAccount');
 const boutiquesRoutes = require('./routes/boutiques');
@@ -64,7 +65,12 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
       'http://127.0.0.1:5173'
     ];
 
-app.use(cors({}));
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+}));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -88,6 +94,7 @@ app.use('/api/categories', categoriesRoutes);
 app.use('/api/variants', variantsRoutes);
 app.use('/api/google', googleAuthRoutes);
 app.use('/api/delivery-pricing', deliveryPricingRoutes);
+app.use('/api/ecotrack-fees', ecotrackFeesRoutes);
 app.use('/api/order-product', orderProductRoutes);
 app.use('/api/auto-import', autoImportRoutes);
 app.use('/api/ecotrack', ecotrackRoutes);

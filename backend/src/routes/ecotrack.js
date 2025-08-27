@@ -313,7 +313,9 @@ router.post('/create-order',
             fullOrderData = {
               ...orders[0],
               ...orderData,
-              id: orderId
+              id: orderId,
+              confirmed_by_name: req.user?.name || req.user?.username || 'System', // Add confirmer name
+              station_code: orderData.station_code // Pass through station code from frontend
             };
             console.log(`📄 Enhanced order data with database info for account selection`);
           }
@@ -488,6 +490,84 @@ router.get('/status',
         success: false, 
         message: 'Failed to get status',
         error: error.message 
+      });
+    }
+  }
+);
+
+// Get Ecotrack station codes (desks)
+router.get('/stations', 
+  authenticateToken, 
+  requirePermission('canViewIntegrations'), 
+  async (req, res) => {
+    try {
+      console.log('🚉 EcoTrack stations endpoint called by user:', req.user?.name || req.user?.id);
+      console.log('🚉 Fetching EcoTrack station codes...');
+      
+      const stations = await ecotrackService.fetchStationCodes();
+      
+      console.log(`✅ Successfully fetched ${stations.length} stations from EcoTrack API`);
+      console.log('📊 Sample stations:', stations.slice(0, 3).map(s => ({ code: s.code, name: s.name })));
+      
+      res.json({
+        success: true,
+        message: 'Station codes fetched successfully',
+        data: stations,
+        count: stations.length,
+        cached: true // Indicates if data is from cache
+      });
+      
+    } catch (error) {
+      console.error('❌ Error getting EcoTrack stations:', error);
+      console.error('❌ Error stack:', error.stack);
+      
+      res.status(500).json({ 
+        success: false, 
+        message: 'Failed to fetch station codes',
+        error: error.message,
+        details: 'Make sure EcoTrack credentials are configured correctly'
+      });
+    }
+  }
+);
+
+// Get delivery fees for a specific wilaya from EcoTrack API
+router.post('/get-fees', 
+  authenticateToken, 
+  requirePermission('canCreateOrders'), 
+  async (req, res) => {
+    try {
+      const { wilaya_id } = req.body;
+      
+      console.log('💰 EcoTrack fees endpoint called for wilaya:', wilaya_id);
+      
+      if (!wilaya_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'wilaya_id is required'
+        });
+      }
+      
+      const fees = await ecotrackService.getDeliveryFees(wilaya_id);
+      
+      console.log(`✅ Successfully fetched delivery fees for wilaya ${wilaya_id}:`, fees);
+      
+      res.json({
+        success: true,
+        message: 'Delivery fees fetched successfully',
+        fees: fees,
+        wilaya_id: wilaya_id
+      });
+      
+    } catch (error) {
+      console.error('❌ Error getting EcoTrack delivery fees:', error);
+      console.error('❌ Error stack:', error.stack);
+      
+      res.status(500).json({ 
+        success: false, 
+        message: 'Failed to fetch delivery fees',
+        error: error.message,
+        details: 'Make sure EcoTrack credentials are configured correctly'
       });
     }
   }

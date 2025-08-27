@@ -152,12 +152,23 @@ const DeliveryPricing = () => {
 
   const handleToggleWilayaStatus = async (wilaya, isActive) => {
     try {
-      await deliveryPricingService.toggleWilayaStatus(wilaya.id, isActive);
+      console.log(`🔄 Toggling wilaya ${wilaya.id} status to: ${isActive}`);
+      const result = await deliveryPricingService.toggleWilayaStatus(wilaya.id, isActive);
+      console.log(`✅ Toggle status result:`, result);
       message.success(t(`success.${isActive ? 'activated' : 'deactivated'}`));
       fetchData();
     } catch (error) {
-      message.error(t('error.updateFailed'));
-      console.error('Error toggling wilaya status:', error);
+      console.error('❌ Error toggling wilaya status:', error);
+      console.error('❌ Error response:', error.response?.data);
+      console.error('❌ Error status:', error.response?.status);
+      
+      // Show specific error message
+      const errorMessage = error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          error.message || 
+                          t('error.updateFailed');
+      
+      message.error(`${t('error.updateFailed')}: ${errorMessage}`);
     }
   };
 

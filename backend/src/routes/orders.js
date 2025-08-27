@@ -79,28 +79,86 @@ router.post('/calculate-delivery-price', authenticateToken, async (req, res) => 
       });
     }
 
-    const pricingData = {
-      wilaya_id,
-      baladia_id,
-      delivery_type,
-      weight: parseFloat(weight),
-      volume: parseFloat(volume),
-      pricing_level
-    };
+    console.log(`🚚 [DELIVERY-PRICE] Calculating for wilaya ${wilaya_id}, delivery_type: ${delivery_type}`);
 
-    const pricing = pricing_level === 'baladia' && baladia_id
-      ? await DeliveryPricingService.calculateDeliveryPriceWithLocation(pricingData)
-      : await DeliveryPricingService.calculateDeliveryPrice(
-          wilaya_id,
-          delivery_type,
-          parseFloat(weight),
-          parseFloat(volume)
-        );
-
-    res.json({
-      success: true,
-      data: pricing
-    });
+    // Try to get pricing from EcoTrack fees API first (using GET method as API requires)
+    try {
+      const ecotrackService = require('../services/ecotrackService');
+      
+      console.log(`📡 [ECOTRACK-FEES] Fetching fees from EcoTrack API (GET method)...`);
+      const feesData = await ecotrackService.getDeliveryFees();
+      
+      console.log(`📡 [ECOTRACK-FEES] Raw API response:`, JSON.stringify(feesData, null, 2));
+      
+      // Handle multiple possible response formats
+      let wilayaFees = null;
+      const wilayaKey = wilaya_id.toString();
+      
+      // Try format 1: response.tarifs.delivery[wilaya_id] (contains actual delivery prices)
+      if (feesData && feesData.tarifs && feesData.tarifs.delivery && feesData.tarifs.delivery[wilayaKey]) {
+        wilayaFees = feesData.tarifs.delivery[wilayaKey];
+        console.log(`📊 [ECOTRACK-FEES] Found delivery fees using tarifs.delivery format for wilaya ${wilaya_id}`);
+      }
+      // Try format 2: response.tarifs.return[wilaya_id] (fallback - contains lower return prices)
+      else if (feesData && feesData.tarifs && feesData.tarifs.return && feesData.tarifs.return[wilayaKey]) {
+        wilayaFees = feesData.tarifs.return[wilayaKey];
+        console.log(`📊 [ECOTRACK-FEES] Found return fees (fallback) using tarifs.return format for wilaya ${wilaya_id}`);
+      }
+      // Try format 3: direct response[wilaya_id] (alternative format)
+      else if (feesData && feesData[wilayaKey]) {
+        wilayaFees = feesData[wilayaKey];
+        console.log(`📊 [ECOTRACK-FEES] Found fees using direct format for wilaya ${wilaya_id}`);
+      }
+      
+      if (wilayaFees && (wilayaFees.tarif || wilayaFees.tarif_stopdesk)) {
+        console.log(`📊 [ECOTRACK-FEES] Found fees for wilaya ${wilaya_id}:`, wilayaFees);
+        
+        // Choose the appropriate tarif based on delivery type
+        const price = delivery_type === 'stop_desk' 
+          ? parseFloat(wilayaFees.tarif_stopdesk || wilayaFees.tarif || 0)
+          : parseFloat(wilayaFees.tarif || 0);
+          
+        console.log(`📡 [ECOTRACK-FEES] Using EcoTrack official API - Type: ${delivery_type}, Price: ${price} DA`);
+        console.log(`📊 [ECOTRACK-FEES] Available tariffs:`, {
+          regular: wilayaFees.tarif,
+          stop_desk: wilayaFees.tarif_stopdesk,
+          selected_price: price
+        });
+        
+        if (price > 0) {
+          return res.json({
+            success: true,
+            data: {
+              delivery_price: price,
+              price: price,
+              source: 'ecotrack_official_api',
+              delivery_type: delivery_type,
+              wilaya_id: wilaya_id,
+              tarif_info: {
+                regular: wilayaFees.tarif,
+                stop_desk: wilayaFees.tarif_stopdesk
+              }
+            }
+          });
+        }
+      } else {
+        console.log(`⚠️ [ECOTRACK-FEES] No fees data found for wilaya ${wilaya_id}`);
+        console.log(`⚠️ [ECOTRACK-FEES] Available wilayas in response:`, Object.keys(feesData?.tarifs?.return || feesData || {}));
+      }
+    } catch (ecotrackError) {
+      console.warn(`⚠️ [ECOTRACK-FEES] Failed to get fees from EcoTrack official API:`, ecotrackError.message);
+      
+      // As requested, only use EcoTrack API - no fallback to local pricing
+      return res.status(500).json({
+        success: false,
+        error: 'EcoTrack API unavailable',
+        message: 'Delivery price calculation requires EcoTrack API. Please try again later.',
+        data: {
+          source: 'ecotrack_api_failed',
+          api_error: ecotrackError.message
+        }
+      });
+    }
   } catch (error) {
     console.error('Error calculating delivery price:', error);
     res.status(500).json({
@@ -667,7 +725,7 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
       'product_details', 'total_amount', 'status', 'payment_status', 'assigned_to',
       'confirmed_by', 'delivery_date', 'notes', 'ecotrack_tracking_id',
       'ecotrack_status', 'ecotrack_last_update', 'wilaya_id', 'baladia_id', 'delivery_type',
-      'delivery_price', 'product_weight', 'pricing_level'
+      'delivery_price', 'product_weight', 'pricing_level', 'ecotrack_station_code'
     ];
 
     Object.keys(updates).forEach(key => {
@@ -772,11 +830,14 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
           customer_city: order.customer_city,
           product_details: productInfo,
           total_amount: order.total_amount,
+          delivery_price: order.delivery_price, // Add delivery_price for correct calculation
           notes: order.notes || '',
+          confirmed_by_name: req.user?.name || req.user?.username || 'System', // Add confirmer name
           delivery_type: order.delivery_type || 'home',
           wilaya_id: order.wilaya_id,
           baladia_name: order.baladia_name,
-          weight: order.weight || 1
+          weight: order.weight || 1,
+          station_code: order.ecotrack_station_code // Add station code from frontend
         };
         
         console.log(`📦 BEFORE ECOTRACK CALL: Shipment data:`, shipmentData);
@@ -1867,11 +1928,14 @@ router.post('/batch-ecotrack', authenticateToken, requirePermission('canEditOrde
             customer_city: order.customer_city,
             product_details: productInfo,
             total_amount: order.total_amount,
+            delivery_price: order.delivery_price, // Add delivery_price for correct calculation
             notes: order.notes || '',
+            confirmed_by_name: req.user?.name || req.user?.username || 'System', // Add confirmer name
             delivery_type: order.delivery_type || 'home',
             wilaya_id: order.wilaya_id,
             baladia_name: order.baladia_name,
-            weight: order.weight || 1
+            weight: order.weight || 1,
+            station_code: order.ecotrack_station_code // Add station code from order
           };
 
           console.log(`📦 BATCH: Calling Ecotrack API for order ${order.order_number}`);

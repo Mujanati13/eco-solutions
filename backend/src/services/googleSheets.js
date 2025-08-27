@@ -213,23 +213,56 @@ class GoogleSheetsService {
             price: orderData.total_amount || 0
           };
 
-          // Ensure order number is unique
-          let finalOrderNumber = orderData.order_number;
-          let attempts = 0;
-          while (attempts < 5) {
-            const [existingOrder] = await pool.query('SELECT id FROM orders WHERE order_number = ? LIMIT 1', [finalOrderNumber]);
-            if (existingOrder.length === 0) {
-              break;
+          // Check for duplicate orders
+          let isDuplicate = false;
+          let existingOrderId = null;
+          let duplicateReason = '';
+          
+          // First check by order number if it exists
+          if (orderData.order_number && orderData.order_number.trim() !== '') {
+            const [orderCheck] = await pool.query(
+              'SELECT id FROM orders WHERE order_number = ? LIMIT 1', 
+              [orderData.order_number]
+            );
+            if (orderCheck.length > 0) {
+              isDuplicate = true;
+              existingOrderId = orderCheck[0].id;
+              duplicateReason = `order number: ${orderData.order_number}`;
             }
-            finalOrderNumber = `${orderData.order_number}-${Math.random().toString(36).substr(2, 3)}`;
-            attempts++;
+          } else {
+            // If no order number, check by customer details to prevent duplicates
+            if (orderData.customer_phone && orderData.customer_name) {
+              const [customerCheck] = await pool.query(`
+                SELECT id FROM orders 
+                WHERE customer_phone = ? 
+                AND customer_name = ? 
+                AND ABS(total_amount - ?) < 0.01
+                AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+                LIMIT 1
+              `, [orderData.customer_phone, orderData.customer_name, orderData.total_amount || 0]);
+              
+              if (customerCheck.length > 0) {
+                isDuplicate = true;
+                existingOrderId = customerCheck[0].id;
+                duplicateReason = `customer details: ${orderData.customer_name} (${orderData.customer_phone})`;
+              }
+            }
           }
-
-          if (attempts >= 5) {
-            console.error(`❌ Failed to generate unique order number after 5 attempts for order ${orderData.order_number}`);
-            errors.push(`Order ${orderData.order_number}: Failed to generate unique order number`);
+          
+          if (isDuplicate) {
+            console.log(`🔄 Skipping duplicate order by ${duplicateReason} (Order ID: ${existingOrderId})`);
+          }
+          
+          // Skip if duplicate found
+          if (isDuplicate) {
+            console.log(`⏭️ Order already exists, skipping: ${duplicateReason}`);
             continue;
           }
+
+          // Generate order number if not provided (for orders without order numbers)
+          const finalOrderNumber = orderData.order_number && orderData.order_number.trim() !== '' 
+            ? orderData.order_number 
+            : `AUTO-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
           // Determine pricing level
           const pricingLevel = baladiaId ? 'baladia' : 'wilaya';
@@ -241,7 +274,7 @@ class GoogleSheetsService {
               customer_address, customer_city, product_details, total_amount, status,
               payment_status, notes, created_at, assigned_to,
               wilaya_code, wilaya_id, baladia_id, baladia_name, weight, delivery_type, delivery_price, pricing_level,
-              source_spreadsheet_id, source_sheet_name, source_file_name
+              source_spreadsheet_id, source_sheet_name, source_file_name, ecotrack_tracking_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `, [
             finalOrderNumber,
@@ -269,11 +302,12 @@ class GoogleSheetsService {
             orderData.source_file_name || null
           ]);
 
-          console.log(`✅ Successfully saved order ${finalOrderNumber} with source tracking`);
+          const actualOrderNumber = finalOrderNumber;
+          console.log(`✅ Successfully saved order ${actualOrderNumber} with source tracking`);
 
           imported.push({
             id: result.insertId,
-            order_number: finalOrderNumber,
+            order_number: actualOrderNumber,
             customer_name: orderData.customer_name,
             total_amount: orderData.total_amount
           });
@@ -777,25 +811,52 @@ class GoogleSheetsService {
           // Before insert: log resolved geography
           console.log(`📍 Resolved wilaya: name='${wilayaName}', code='${resolvedWilayaCode}', id=${wilayaId}; baladiaId=${baladiaId}`);
 
-          // Ensure order number is unique
-          let finalOrderNumber = orderData.order_number;
-          let attempts = 0;
-          while (attempts < 5) { // Max 5 attempts to find unique number
-            const [existingOrder] = await pool.query('SELECT id FROM orders WHERE order_number = ? LIMIT 1', [finalOrderNumber]);
-            if (existingOrder.length === 0) {
-              break; // Order number is unique
+          // Check for duplicate orders (same logic as saveOrdersToDatabase)
+          let isDuplicate = false;
+          let existingOrderId = null;
+          let duplicateReason = '';
+          
+          // First check by order number if it exists
+          if (orderData.order_number && orderData.order_number.trim() !== '') {
+            const [orderCheck] = await pool.query(
+              'SELECT id FROM orders WHERE order_number = ? LIMIT 1', 
+              [orderData.order_number]
+            );
+            if (orderCheck.length > 0) {
+              isDuplicate = true;
+              existingOrderId = orderCheck[0].id;
+              duplicateReason = `order number: ${orderData.order_number}`;
             }
-            // Generate new order number
-            finalOrderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-            attempts++;
-            console.log(`🔄 Order number collision detected, trying: ${finalOrderNumber}`);
+          } else {
+            // If no order number, check by customer details to prevent duplicates
+            if (orderData.customer_phone && orderData.customer_name) {
+              const [customerCheck] = await pool.query(`
+                SELECT id FROM orders 
+                WHERE customer_phone = ? 
+                AND customer_name = ? 
+                AND ABS(total_amount - ?) < 0.01
+                AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+                LIMIT 1
+              `, [orderData.customer_phone, orderData.customer_name, orderData.total_amount || 0]);
+              
+              if (customerCheck.length > 0) {
+                isDuplicate = true;
+                existingOrderId = customerCheck[0].id;
+                duplicateReason = `customer details: ${orderData.customer_name} (${orderData.customer_phone})`;
+              }
+            }
           }
-
-          if (attempts >= 5) {
-            console.error(`❌ Failed to generate unique order number after 5 attempts for row ${rowIndex + 1}`);
-            errors.push(`Row ${rowIndex + 1}: Failed to generate unique order number`);
+          
+          // Skip if duplicate found
+          if (isDuplicate) {
+            console.log(`⏭️ Skipping duplicate order by ${duplicateReason} (Order ID: ${existingOrderId}) - Row ${rowNumber}`);
             continue;
           }
+
+          // Generate final order number for new orders
+          const finalOrderNumber = orderData.order_number && orderData.order_number.trim() !== '' 
+            ? orderData.order_number 
+            : `AUTO-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
           // Decide pricing level
           const pricingLevel = baladiaId ? 'baladia' : 'wilaya';
