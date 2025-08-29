@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import VirtualList from 'rc-virtual-list';
 import {
   Table,
   Button,
@@ -76,8 +77,10 @@ const OrderManagement = () => {
   const [editingOrder, setEditingOrder] = useState(null);
   const [form] = Form.useForm();
   const [searchText, setSearchText] = useState("");
+  // Debounced search text to avoid heavy re-filtering on each keystroke
+  const [debouncedSearchText, setDebouncedSearchText] = useState("");
   const [allOrders, setAllOrders] = useState([]); // Store all orders for frontend filtering
-  const [filteredOrders, setFilteredOrders] = useState([]); // Store filtered orders
+  // removed: filteredOrders state (now using derivedFilteredOrders useMemo)
   const [statusFilter, setStatusFilter] = useState("");
   const [assignedToFilter, setAssignedToFilter] = useState("");
   const [pagination, setPagination] = useState({
@@ -122,9 +125,32 @@ const OrderManagement = () => {
   
   // Multi-selection and bulk operations state
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
-  const [selectedOrders, setSelectedOrders] = useState([]);
+  // Removed separate selectedOrders state; compute from selectedRowKeys via memo below for performance
   const [bulkSendToDeliveryLoading, setBulkSendToDeliveryLoading] = useState(false);
   const [bulkDeliveryModalVisible, setBulkDeliveryModalVisible] = useState(false);
+  const [bulkAssignedTo, setBulkAssignedTo] = useState(null);
+  // Optimistic status update state
+  const [updatingStatusId, setUpdatingStatusId] = useState(null);
+  
+
+  // Lightweight cache helpers for static/slow-changing lists
+  const getCache = React.useCallback((key) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (obj && obj.e && Date.now() < obj.e) return obj.v;
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const setCache = React.useCallback((key, value, ttlMs) => {
+    try {
+      localStorage.setItem(key, JSON.stringify({ v: value, e: Date.now() + ttlMs }));
+    } catch {}
+  }, []);
 
   // Product and stock tracking state
   const [products, setProducts] = useState([]);
@@ -156,10 +182,139 @@ const OrderManagement = () => {
   const canImportOrders = isAdmin;
   const canDistributeOrders = isAdmin;
 
+  // Env-aware logging (noisy logs disabled in production)
+  const isDev = (
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.MODE !== 'production') ||
+    (typeof process !== 'undefined' && process.env && process.env.NODE_ENV !== 'production')
+  );
+  const devLog = (...args) => { if (isDev) console.log(...args); };
+
+  // Ensure users are loaded only when needed
+  const ensureUsers = React.useCallback(() => {
+    if (!canAssignOrders) return;
+    if (!usersLoading && (!Array.isArray(users) || users.length === 0)) {
+      fetchUsers();
+    }
+  }, [canAssignOrders, usersLoading, users]);
+
+  // Derived filtered orders (useMemo instead of extra state to avoid re-renders and double work)
+  const derivedFilteredOrders = React.useMemo(() => {
+    let filtered = Array.isArray(allOrders) ? [...allOrders] : [];
+
+    // Apply phone/name search
+    if (debouncedSearchText && debouncedSearchText.trim()) {
+      const searchTerm = debouncedSearchText.trim().toLowerCase();
+      filtered = filtered.filter(order =>
+        (order.customer_phone && order.customer_phone.toLowerCase().includes(searchTerm)) ||
+        (order.customer_name && order.customer_name.toLowerCase().includes(searchTerm))
+      );
+      if (isDev) {
+        console.log('📱 Frontend filtering by phone/name:', searchTerm);
+        console.log('📊 Filtered results:', filtered.length);
+      }
+    }
+
+    // Status filter
+    if (statusFilter) {
+      filtered = filtered.filter(order => order.status === statusFilter);
+    }
+
+    // Assigned filter
+    if (assignedToFilter) {
+      if (assignedToFilter === 'null') {
+        filtered = filtered.filter(order => !order.assigned_to);
+      } else {
+        filtered = filtered.filter(order => order.assigned_to == assignedToFilter);
+      }
+    }
+
+    // Boutique filter (inline logic to avoid dependency on later-defined helper)
+    if (boutiqueFilter) {
+      const productsList = Array.isArray(products) ? products : [];
+      const locationsList = Array.isArray(locations) ? locations : [];
+
+      filtered = filtered.filter(order => {
+        // Parse product details
+        let productName = null;
+        try {
+          const pd = typeof order.product_details === 'string' ? JSON.parse(order.product_details) : order.product_details;
+          productName = pd?.name ? String(pd.name) : null;
+        } catch (_) {}
+
+        if (!productName) {
+          // No product details available
+          return boutiqueFilter === 'no_match' ? true : boutiqueFilter === 'has_match' ? false : false;
+        }
+
+        const orderProductName = productName.toLowerCase().trim();
+        const normalizedOrderName = orderProductName.replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, ' ');
+
+        // Find matched product in our products list
+        let matchedProduct = null;
+        for (const p of productsList) {
+          if (!p?.name) continue;
+          const dbName = p.name.toLowerCase().trim();
+          const normalizedDbName = dbName.replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, ' ');
+          if (
+            dbName === orderProductName ||
+            dbName.includes(orderProductName) ||
+            orderProductName.includes(dbName) ||
+            normalizedDbName === normalizedOrderName ||
+            normalizedDbName.includes(normalizedOrderName) ||
+            normalizedOrderName.includes(normalizedDbName)
+          ) {
+            matchedProduct = p;
+            break;
+          }
+        }
+
+        if (!matchedProduct) {
+          // No DB product match found
+          return boutiqueFilter === 'no_match';
+        }
+
+        if (boutiqueFilter === 'has_match') return true;
+        // Specific boutique (location id)
+        const locId = matchedProduct.location_id;
+        if (!locId) return false;
+        return String(locId) == String(boutiqueFilter);
+      });
+      if (isDev) {
+        console.log('🏪 Frontend filtering by boutique:', boutiqueFilter);
+        console.log('📊 Boutique filtered results:', filtered.length);
+      }
+    }
+
+    return filtered;
+  }, [allOrders, debouncedSearchText, statusFilter, assignedToFilter, boutiqueFilter, products, locations, isDev]);
+
+  // Reset to first page when filters change (keep user experience consistent)
+  useEffect(() => {
+    setPagination(prev => ({ ...prev, current: 1 }));
+  }, [debouncedSearchText, statusFilter, assignedToFilter, boutiqueFilter]);
+
+  // Memoize parsed product details for table rendering (avoids repeated JSON.parse)
+  const parsedProductDetailsById = React.useMemo(() => {
+    const map = new Map();
+    const source = Array.isArray(derivedFilteredOrders) ? derivedFilteredOrders : Array.isArray(allOrders) ? allOrders : [];
+    for (const o of source) {
+      let parsed = null;
+      try {
+        if (o?.product_details) {
+          parsed = typeof o.product_details === 'string' ? JSON.parse(o.product_details) : o.product_details;
+        }
+      } catch (e) {
+        // ignore parse errors
+      }
+      map.set(o?.id, parsed);
+    }
+    return map;
+  }, [derivedFilteredOrders, allOrders]);
+
   // Calculate statistics from orders
   const calculateStatistics = () => {
     const stats = {
-      total: filteredOrders.length,
+      total: derivedFilteredOrders.length,
       pending: 0,
       confirmed: 0,
       processing: 0,
@@ -170,7 +325,7 @@ const OrderManagement = () => {
       averageAmount: 0,
     };
 
-    filteredOrders.forEach(order => {
+    derivedFilteredOrders.forEach(order => {
       stats.totalAmount += parseFloat(order.total_amount || 0);
       
       switch(order.status) {
@@ -207,23 +362,22 @@ const OrderManagement = () => {
   useEffect(() => {
     fetchOrders();
     fetchOrdersWithProducts();
-    if (canAssignOrders) {
-      fetchUsers();
-    }
+    // Lazy-load users now; fetch only when user opens assignment UI
     
     // Debug function for checking tracking IDs
+    if (!isDev) return; // Register debug helpers only in dev
     window.debugTrackingIds = () => {
-      console.log('🔍 Debug: All orders with EcoTrack tracking IDs:');
+      devLog('🔍 Debug: All orders with EcoTrack tracking IDs:');
       const ordersWithTracking = allOrders.filter(order => order.ecotrack_tracking_id);
       
       if (ordersWithTracking.length === 0) {
-        console.log('❌ No orders found with EcoTrack tracking IDs');
-        console.log('Available orders:', allOrders.length);
+        devLog('❌ No orders found with EcoTrack tracking IDs');
+        devLog('Available orders:', allOrders.length);
         return;
       }
       
       ordersWithTracking.forEach(order => {
-        console.log(`Order ${order.id} (${order.order_number}):`, {
+        devLog(`Order ${order.id} (${order.order_number}):`, {
           tracking_id: order.ecotrack_tracking_id,
           type: typeof order.ecotrack_tracking_id,
           length: order.ecotrack_tracking_id?.toString().length,
@@ -233,13 +387,13 @@ const OrderManagement = () => {
         });
       });
       
-      console.log(`📊 Total orders with tracking: ${ordersWithTracking.length}`);
+      devLog(`📊 Total orders with tracking: ${ordersWithTracking.length}`);
     };
     
     // Debug function to test delete API with specific tracking ID
     window.testEcotrackDelete = async (trackingId, orderId = null) => {
       try {
-        console.log(`🧪 Testing EcoTrack delete API via backend:`, {
+        devLog(`🧪 Testing EcoTrack delete API via backend:`, {
           trackingId: trackingId,
           orderId: orderId,
           length: trackingId?.length
@@ -482,69 +636,13 @@ const OrderManagement = () => {
     initializeGoogleSheets();
   }, []);
 
-  // Frontend filtering effect
+  // Debounce search text updates
   useEffect(() => {
-    applyFrontendFilters();
-  }, [searchText, allOrders, statusFilter, assignedToFilter, boutiqueFilter]);
+    const id = setTimeout(() => setDebouncedSearchText(searchText), 250);
+    return () => clearTimeout(id);
+  }, [searchText]);
 
-  const applyFrontendFilters = () => {
-    let filtered = [...allOrders];
-
-    // Apply phone search filter
-    if (searchText && searchText.trim()) {
-      const searchTerm = searchText.trim().toLowerCase();
-      filtered = filtered.filter(order => 
-        (order.customer_phone && 
-         order.customer_phone.toLowerCase().includes(searchTerm)) ||
-        (order.customer_name && 
-         order.customer_name.toLowerCase().includes(searchTerm))
-      );
-      console.log('📱 Frontend filtering by phone/name:', searchTerm);
-      console.log('📊 Filtered results:', filtered.length);
-    }
-
-    // Apply status filter
-    if (statusFilter) {
-      filtered = filtered.filter(order => order.status === statusFilter);
-    }
-
-    // Apply assigned to filter
-    if (assignedToFilter) {
-      if (assignedToFilter === "null") {
-        filtered = filtered.filter(order => !order.assigned_to);
-      } else {
-        filtered = filtered.filter(order => order.assigned_to == assignedToFilter);
-      }
-    }
-
-    // Apply boutique filter
-    if (boutiqueFilter) {
-      filtered = filtered.filter(order => {
-        const boutiqueInfo = getOrderProductBoutique(order);
-        if (boutiqueFilter === "no_match") {
-          // Show orders that don't have products in our database
-          return !boutiqueInfo;
-        } else if (boutiqueFilter === "has_match") {
-          // Show orders that have products in our database (any boutique)
-          return !!boutiqueInfo;
-        } else {
-          // Show orders with products from specific boutique
-          return boutiqueInfo && boutiqueInfo.locationId == boutiqueFilter;
-        }
-      });
-      console.log('🏪 Frontend filtering by boutique:', boutiqueFilter);
-      console.log('📊 Boutique filtered results:', filtered.length);
-    }
-
-    setFilteredOrders(filtered);
-    
-    // Update pagination total based on filtered results
-    setPagination(prev => ({
-      ...prev,
-      total: filtered.length,
-      current: 1 // Reset to first page when filtering
-    }));
-  };
+  // removed: applyFrontendFilters and its effect; filtering handled by derivedFilteredOrders
 
   const fetchOrders = async () => {
     try {
@@ -586,6 +684,19 @@ const OrderManagement = () => {
     }
   };
 
+  // Debounced refresh guard to avoid double fetches (defined after fetchOrders)
+  const lastRefreshAtRef = React.useRef(0);
+  const refreshOrdersOnce = React.useCallback((reason = 'unknown') => {
+    const now = Date.now();
+    if (now - lastRefreshAtRef.current < 400) {
+      if (isDev) console.log('⏭️ Skipping duplicate refresh within 400ms:', reason);
+      return;
+    }
+    lastRefreshAtRef.current = now;
+    if (isDev) console.log('🔄 Refreshing orders:', reason);
+    fetchOrders();
+  }, [isDev]);
+
   const fetchOrdersWithProducts = async () => {
     try {
       const response = await orderProductService.getOrdersWithProducts();
@@ -604,6 +715,14 @@ const OrderManagement = () => {
   const fetchUsers = async () => {
     try {
       setUsersLoading(true);
+      // Try cache first (10 minutes TTL)
+      const cached = getCache('users_v1');
+      if (cached && Array.isArray(cached)) {
+        setUsers(cached);
+        setUsersLoading(false);
+        return;
+      }
+
       const response = await userService.getUsers();
 
       // Based on your API format, the response should have { users: [...], pagination: {...} }
@@ -611,7 +730,8 @@ const OrderManagement = () => {
 
       // Ensure usersData is an array
       const finalUsers = Array.isArray(usersData) ? usersData : [];
-      setUsers(finalUsers);
+  setUsers(finalUsers);
+  setCache('users_v1', finalUsers, 10 * 60 * 1000);
     } catch (error) {
       message.error(t("users.fetchFailed"));
       setUsers([]); // Set empty array on error
@@ -637,9 +757,15 @@ const OrderManagement = () => {
   const fetchWilayas = async () => {
     try {
       setLoadingWilayas(true);
+      const cached = getCache('wilayas_v1');
+      if (cached) {
+        setWilayas(cached);
+        return;
+      }
       const response = await orderService.getWilayas();
       if (response.success) {
         setWilayas(response.data);
+        setCache('wilayas_v1', response.data, 24 * 60 * 60 * 1000);
       }
     } catch (error) {
       console.error("Error fetching wilayas:", error);
@@ -653,10 +779,18 @@ const OrderManagement = () => {
     try {
       setLoadingBaladias(true);
       console.log('Fetching baladias for wilaya:', wilayaId);
+      const cacheKey = `baladias_${wilayaId}_v1`;
+      const cached = getCache(cacheKey);
+      if (cached) {
+        setBaladias(cached);
+        console.log('Set baladias from cache:', cached.length, 'items');
+        return;
+      }
       const response = await orderService.getBaladiasByWilaya(wilayaId);
       console.log('Baladias response:', response);
       if (response.success) {
         setBaladias(response.data);
+        setCache(cacheKey, response.data, 24 * 60 * 60 * 1000);
         console.log('Set baladias:', response.data.length, 'items');
       }
     } catch (error) {
@@ -671,6 +805,12 @@ const OrderManagement = () => {
     console.log('🚉 Starting to fetch EcoTrack stations...');
     setLoadingStations(true);
     try {
+      const cached = getCache('ecotrack_stations_v1');
+      if (cached) {
+        setEcotrackStations(cached);
+        setLoadingStations(false);
+        return;
+      }
       const response = await fetch('/api/ecotrack/stations', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -685,6 +825,7 @@ const OrderManagement = () => {
         
         if (result.success && result.data) {
           setEcotrackStations(result.data);
+          setCache('ecotrack_stations_v1', result.data, 24 * 60 * 60 * 1000);
           console.log(`✅ Successfully loaded ${result.data.length} EcoTrack stations`);
           console.log('📊 Sample stations:', result.data.slice(0, 3));
         } else {
@@ -1125,32 +1266,44 @@ const OrderManagement = () => {
       return null;
     };
 
-    // Get the general variant (this is what we want to display)
-    const generalVariant = getVariantValue(['variant', 'variante', 'product_variant', 'name', 'description']);
+    // Get the primary variant value - prioritize the 'variant' field first
+    const primaryVariant = getVariantValue(['variant', 'variante']);
     
-    // Return just the variant value, clean and simple
-    if (generalVariant) {
-      console.log('✅ Found variant to add to notes:', generalVariant);
-      return generalVariant;
+    // Return just the primary variant value, clean and simple
+    if (primaryVariant) {
+      console.log('✅ Found primary variant to add to notes:', primaryVariant);
+      return primaryVariant;
     }
     
-    // Fallback: try to get any meaningful variant information
-    const size = getVariantValue(['size', 'taille', 'Size', 'Taille']);
+    // If no primary variant, check other specific fields in order of preference
     const color = getVariantValue(['color', 'couleur', 'Color', 'Couleur']);
+    const size = getVariantValue(['size', 'taille', 'Size', 'Taille']);
     const model = getVariantValue(['model', 'modele', 'modèle', 'Model', 'Modèle']);
     const style = getVariantValue(['style', 'Style', 'type', 'Type']);
     
-    // If no general variant, try to combine available attributes
-    const variantParts = [];
-    if (size) variantParts.push(size);
-    if (color) variantParts.push(color);
-    if (model) variantParts.push(model);
-    if (style) variantParts.push(style);
+    // Return the first available specific attribute
+    if (color) {
+      console.log('✅ Found color variant to add to notes:', color);
+      return color;
+    }
+    if (size) {
+      console.log('✅ Found size variant to add to notes:', size);
+      return size;
+    }
+    if (model) {
+      console.log('✅ Found model variant to add to notes:', model);
+      return model;
+    }
+    if (style) {
+      console.log('✅ Found style variant to add to notes:', style);
+      return style;
+    }
     
-    if (variantParts.length > 0) {
-      const combinedVariant = variantParts.join(' ');
-      console.log('✅ Found combined variant to add to notes:', combinedVariant);
-      return combinedVariant;
+    // Last fallback: check name/description
+    const nameVariant = getVariantValue(['name', 'description']);
+    if (nameVariant) {
+      console.log('✅ Found name variant to add to notes:', nameVariant);
+      return nameVariant;
     }
     
     console.log('❌ No variant information found');
@@ -1841,23 +1994,40 @@ const OrderManagement = () => {
       console.log('💰 [DEBUG] Using original delivery price from API:', deliveryPrice);
       console.log('💰 [DEBUG] Total amount:', totalAmount);
       
-      const finalTotal = totalAmount + deliveryPrice;
-
+      // Extract quantity from product_info
+      const quantity = values.product_info?.quantity ? parseInt(values.product_info.quantity) : 1;
+      
+      // Calculate final total with quantity
+      const unitPrice = parseFloat(values.total_amount || 0);
+      const productTotal = unitPrice * quantity;
+      const calculatedFinalTotal = productTotal + deliveryPrice;
+      
+      console.log(`🧮 [CREATE] Calculating final_total with quantity: ${unitPrice} × ${quantity} + ${deliveryPrice} = ${calculatedFinalTotal}`);
+      
       // Transform product_info to product_details JSON string
       const orderData = {
         ...values,
         delivery_price: deliveryPrice, // Use auto-calculated delivery price
-        final_total: finalTotal,
+        final_total: calculatedFinalTotal,
         product_details: values.product_info ? JSON.stringify(values.product_info) : "",
+        quantity: quantity, // Add quantity as separate field
+        quantity_ordered: quantity // Also add as quantity_ordered for backward compatibility
       };
 
       // Remove the nested product_info since we've converted it to product_details
       delete orderData.product_info;
       
+      console.log('📊 [DEBUG] Order data with quantity:', {
+        quantity: quantity,
+        quantity_ordered: quantity,
+        product_info: values.product_info
+      });
+      
       console.log('📝 Creating order with validated data:', {
         total_amount: totalAmount,
         delivery_price: deliveryPrice,
-        final_total: finalTotal,
+        final_total: calculatedFinalTotal,
+        quantity: quantity,
         wilaya_id: values.wilaya_id
       });
 
@@ -1883,50 +2053,27 @@ const OrderManagement = () => {
       console.log('� [DEBUG] Using original delivery price from API:', deliveryPrice);
       
       const finalTotal = totalAmount + deliveryPrice;
-
-      // Update notes with current variant information from form
-      let updatedNotes = values.notes || '';
-      if (values.product_info) {
-        // Try to find matching product for updated notes
-        let matchedProduct = null;
-        if (values.product_info.name) {
-          try {
-            matchedProduct = await autoSelectProductByName(values.product_info.name);
-          } catch (error) {
-            console.warn('Error during product auto-selection in update:', error);
-          }
-        }
-
-        // Generate updated Excel variant notes
-        const updatedVariantNotes = generateExcelVariantNotes(values.product_info, matchedProduct);
-        
-        if (updatedVariantNotes) {
-          // Simple approach: add variant if not already present
-          if (updatedNotes.trim()) {
-            // Check if variant is already in the notes to avoid duplication
-            if (!updatedNotes.includes(updatedVariantNotes)) {
-              updatedNotes = updatedNotes.trim() + ' ' + updatedVariantNotes;
-            }
-            // If already present, keep notes as is
-          } else {
-            updatedNotes = updatedVariantNotes;
-          }
-          
-          console.log('🔄 Updated notes with current variant info:', {
-            originalNotes: values.notes,
-            updatedNotes: updatedNotes,
-            variantAdded: updatedVariantNotes
-          });
-        }
-      }
+      
+      // Extract quantity from product_info
+      const quantity = values.product_info?.quantity ? parseInt(values.product_info.quantity) : 1;
+      console.log('📊 [DEBUG] Update order - extracted quantity:', quantity, 'from product_info:', values.product_info);
+      
+      // Recalculate final_total with new quantity
+      const unitPrice = parseFloat(values.total_amount || 0);
+      const productTotal = unitPrice * quantity;
+      const recalculatedFinalTotal = productTotal + deliveryPrice;
+      
+      console.log(`🧮 [UPDATE] Recalculating final_total with quantity: ${unitPrice} × ${quantity} + ${deliveryPrice} = ${recalculatedFinalTotal}`);
 
       // Transform product_info to product_details JSON string
       const orderData = {
         ...values,
         delivery_price: deliveryPrice, // Use auto-calculated delivery price
-        notes: updatedNotes, // Use updated notes with current variant info
-        final_total: finalTotal,
+        notes: values.notes || '', // Keep notes as is without adding variant info
+        final_total: recalculatedFinalTotal, // Use recalculated final_total with quantity
         product_details: values.product_info ? JSON.stringify(values.product_info) : "",
+        quantity: quantity, // Add quantity as separate field
+        quantity_ordered: quantity // Also add as quantity_ordered for backward compatibility
       };
 
       // Remove the nested product_info since we've converted it to product_details
@@ -1983,6 +2130,10 @@ const OrderManagement = () => {
   const handleStatusChange = async (orderId, newStatus) => {
     try {
       console.log(`🔄 Status change initiated: Order ${orderId} -> ${newStatus}`);
+      // Optimistic UI: update local state immediately
+      setUpdatingStatusId(orderId);
+      const prevOrders = allOrders;
+      setAllOrders(allOrders.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
       
       // Special handling for cancelled orders with EcoTrack tracking
       if (newStatus === 'cancelled') {
@@ -2032,8 +2183,8 @@ const OrderManagement = () => {
               message.success('Order cancelled and removed from EcoTrack tracking system');
               
               // Backend has already updated the status, so we don't need to do it manually
-              // Just refresh the data and return early
-              fetchOrders();
+              // Just refresh the data once and return early
+              refreshOrdersOnce('cancelled-after-ecotrack-delete');
               return;
             }
           } catch (ecotrackError) {
@@ -2045,7 +2196,7 @@ const OrderManagement = () => {
       }
       
       // Now update the order status (either for non-cancelled orders, or for cancelled orders after successful EcoTrack deletion)
-      const response = await orderService.updateOrder(orderId, { status: newStatus });
+  const response = await orderService.updateOrder(orderId, { status: newStatus });
       console.log(`✅ Status change response:`, response);
       
       // Show success message
@@ -2067,7 +2218,7 @@ const OrderManagement = () => {
         });
       }
       
-      // Handle stock deduction for delivered orders
+  // Handle stock deduction for delivered orders
       if (newStatus === 'delivered') {
         const order = allOrders.find(o => o.id === orderId);
         if (order && order.product_details) {
@@ -2167,15 +2318,21 @@ const OrderManagement = () => {
         console.log(`🔄 Scheduling order refresh in 2 seconds...`);
         setTimeout(() => {
           console.log(`🔄 Refreshing orders to get Ecotrack data...`);
-          fetchOrders();
+          refreshOrdersOnce('confirmed-delayed-refresh');
         }, 2000);
       } else {
         // Show success message for other status changes
         message.success(t("orders.statusUpdateSuccess"));
-        fetchOrders();
+        // Light refresh in background; UI already optimistic
+        refreshOrdersOnce('status-change-success');
       }
     } catch (error) {
       message.error(t("orders.statusUpdateError"));
+      // Rollback optimistic change
+      refreshOrdersOnce('status-change-error-rollback');
+    }
+    finally {
+      setUpdatingStatusId(null);
     }
   };
 
@@ -2228,23 +2385,113 @@ const OrderManagement = () => {
   };
 
   // Multi-selection handlers
-  const handleRowSelectionChange = (selectedRowKeys, selectedRows) => {
-    console.log('🔲 Selected rows changed:', { selectedRowKeys, selectedRows });
-    setSelectedRowKeys(selectedRowKeys);
-    setSelectedOrders(selectedRows);
-  };
+  const handleRowSelectionChange = React.useCallback((keys /* selectedRowKeys */) => {
+    if (isDev) console.log('🔲 Selected rows changed:', { selectedRowKeys: keys });
+    setSelectedRowKeys(keys);
+  }, [isDev]);
+
+  // Compute selected orders lazily from keys to avoid heavy state writes
+  const selectedOrdersMemo = React.useMemo(() => {
+    if (!Array.isArray(selectedRowKeys) || selectedRowKeys.length === 0) return [];
+    const map = new Map((derivedFilteredOrders || []).map(o => [o.id, o]));
+    return selectedRowKeys.map(id => map.get(id)).filter(Boolean);
+  }, [selectedRowKeys, derivedFilteredOrders]);
+
+  // Replace old state usage
+  const selectedOrders = selectedOrdersMemo;
 
   const handleSelectAll = () => {
-    const allRowKeys = filteredOrders.map(order => order.id);
+    const allRowKeys = derivedFilteredOrders.map(order => order.id);
     setSelectedRowKeys(allRowKeys);
-    setSelectedOrders(filteredOrders);
-    message.info(t('orders.selectedAllOrders', { count: filteredOrders.length }));
+    message.info(t('orders.selectedAllOrders', { count: derivedFilteredOrders.length }));
   };
 
   const handleClearSelection = () => {
     setSelectedRowKeys([]);
-    setSelectedOrders([]);
     // message.info(t('orders.selectionCleared'));
+  };
+
+  // Bulk assignment function
+  const handleBulkAssign = async () => {
+    if (!bulkAssignedTo || selectedRowKeys.length === 0) {
+      message.warning(t('orders.selectOrdersAndAssignee') || 'Please select orders and an assignee');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      let successCount = 0;
+      let errorCount = 0;
+
+      // Process assignments in batches
+      for (const orderId of selectedRowKeys) {
+        try {
+          await orderService.assignOrder(orderId, bulkAssignedTo);
+          successCount++;
+        } catch (error) {
+          errorCount++;
+          console.error(`Failed to assign order ${orderId}:`, error);
+        }
+      }
+
+      // Show results
+      if (successCount > 0) {
+        message.success(`Successfully assigned ${successCount} orders`);
+      }
+      if (errorCount > 0) {
+        message.error(`Failed to assign ${errorCount} orders`);
+      }
+
+      // Refresh orders and clear selection
+      await fetchOrders();
+      setSelectedRowKeys([]);
+      setBulkAssignedTo(null);
+    } catch (error) {
+      message.error('Failed to perform bulk assignment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Bulk unassign function
+  const handleBulkUnassign = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning(t('orders.selectOrdersToUnassign') || 'Please select orders to unassign');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      let successCount = 0;
+      let errorCount = 0;
+
+      // Process unassignments in batches
+      for (const orderId of selectedRowKeys) {
+        try {
+          await orderService.updateOrder(orderId, { assigned_to: null });
+          successCount++;
+        } catch (error) {
+          errorCount++;
+          console.error(`Failed to unassign order ${orderId}:`, error);
+        }
+      }
+
+      // Show results
+      if (successCount > 0) {
+        message.success(`Successfully unassigned ${successCount} orders`);
+      }
+      if (errorCount > 0) {
+        message.error(`Failed to unassign ${errorCount} orders`);
+      }
+
+      // Refresh orders and clear selection
+      await fetchOrders();
+      setSelectedRowKeys([]);
+    } catch (error) {
+      message.error('Failed to perform bulk unassignment');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Bulk send to delivery function
@@ -2308,7 +2555,50 @@ const OrderManagement = () => {
             adresse: order.customer_address || order.address || 'Adresse non spécifiée',
             wilaya_id: order.wilaya_id || 16, // Default to Algiers if not set
             commune: validateCommuneForEcotrack(order.baladia_name || order.customer_city || ''),
-            montant: calculateCorrectTotalFinal(order), // Use frontend Total calculation
+            montant: (() => {
+              console.log(`💰 [BULK] Calculating montant for order ${order.id}...`);
+              
+              // Try the main calculation first
+              let calculatedMontant;
+              try {
+                calculatedMontant = calculateCorrectTotalFinal(order);
+                console.log(`💰 [BULK] Order ${order.id} - main calculation result:`, calculatedMontant);
+              } catch (error) {
+                console.error(`❌ [BULK] Order ${order.id} - main calculation failed:`, error);
+                calculatedMontant = null;
+              }
+              
+              // If main calculation failed or returned invalid value, use fallback
+              if (!calculatedMontant || calculatedMontant === 0 || isNaN(calculatedMontant)) {
+                console.warn(`⚠️ [BULK] Order ${order.id} - using fallback calculation`);
+                
+                const totalAmount = parseFloat(order.total_amount || 0);
+                const quantity = parseFloat(order.quantity || order.quantity_ordered || 1);
+                const deliveryPrice = parseFloat(order.delivery_price || 0);
+                const finalTotal = parseFloat(order.final_total || 0);
+                
+                console.log(`🔢 [BULK] Fallback data for order ${order.id}:`, {
+                  totalAmount, quantity, deliveryPrice, finalTotal
+                });
+                
+                // Try final_total first, then calculate from components
+                if (finalTotal > 0) {
+                  calculatedMontant = finalTotal;
+                  console.log(`✅ [BULK] Using final_total: ${calculatedMontant}`);
+                } else if (totalAmount > 0) {
+                  calculatedMontant = (totalAmount * quantity) + deliveryPrice;
+                  console.log(`✅ [BULK] Calculated from components: ${totalAmount} × ${quantity} + ${deliveryPrice} = ${calculatedMontant}`);
+                } else {
+                  // Last resort - use 0 if no data available
+                  calculatedMontant = 0;
+                  console.log(`⚠️ [BULK] Using zero montant (no valid data): ${calculatedMontant}`);
+                }
+              }
+              
+              const finalMontant = calculatedMontant || 0; // Allow 0 values
+              console.log(`💰 [BULK] Final montant for order ${order.id}: ${finalMontant} DA`);
+              return finalMontant;
+            })(), // Use frontend Total calculation with robust fallback
             total_amount: order.total_amount, // Send individual amounts for backend calculation
             delivery_price: order.delivery_price,
             product_details: order.product_details, // Include full product details for variant extraction
@@ -2352,13 +2642,21 @@ const OrderManagement = () => {
           // Calculate correct Total Final for EcoTrack - only fix obvious corruption
           // Simple function to calculate total for EcoTrack (same logic as Total column)
           function calculateCorrectTotalFinal(order) {
-            console.log(`� [ECOTRACK] Calculating total for order ${order.order_number || order.id}...`);
+            console.log(`🧮 [ECOTRACK] Calculating total for order ${order.order_number || order.id}...`);
+            console.log(`🧮 [ECOTRACK] Input data:`, {
+              total_amount: order.total_amount,
+              delivery_price: order.delivery_price,
+              final_total: order.final_total,
+              product_details: order.product_details,
+              quantity: order.quantity,
+              quantity_ordered: order.quantity_ordered
+            });
             
             // Check if we have a pre-calculated final_total from the edit form
             const storedFinalTotal = parseFloat(order.final_total || 0);
             
             if (storedFinalTotal > 0) {
-              console.log(`� [ECOTRACK] Using stored final_total: ${storedFinalTotal} DA`);
+              console.log(`📝 [ECOTRACK] Using stored final_total: ${storedFinalTotal} DA`);
               return storedFinalTotal;
             }
             
@@ -2367,12 +2665,20 @@ const OrderManagement = () => {
             let unitPrice = 0;
             let productTotal = 0;
             
-            if (order.product_details) {
+            // Try to get quantity from multiple sources
+            if (order.quantity && order.quantity > 0) {
+              quantity = parseFloat(order.quantity);
+              console.log(`📊 [ECOTRACK] Using order.quantity: ${quantity}`);
+            } else if (order.quantity_ordered && order.quantity_ordered > 0) {
+              quantity = parseFloat(order.quantity_ordered);
+              console.log(`📊 [ECOTRACK] Using order.quantity_ordered: ${quantity}`);
+            } else if (order.product_details) {
               try {
                 const details = typeof order.product_details === 'string' 
                   ? JSON.parse(order.product_details) 
                   : order.product_details;
                 quantity = parseFloat(details.quantity || 1);
+                console.log(`📊 [ECOTRACK] Using product_details.quantity: ${quantity}`);
                 
                 // If we have unit price in product details, use it
                 if (details.unit_price) {
@@ -2390,7 +2696,8 @@ const OrderManagement = () => {
             if (unitPrice === 0) {
               unitPrice = parseFloat(order.total_amount || 0);
               productTotal = unitPrice * quantity;
-              console.log(`� [ECOTRACK] Using total_amount as unit price: ${unitPrice} DA × ${quantity} = ${productTotal} DA`);
+              console.log(`💰 [ECOTRACK] CRITICAL: Using total_amount as unit price: ${unitPrice} DA × ${quantity} = ${productTotal} DA`);
+              console.log(`💰 [ECOTRACK] This should be: ${unitPrice} × ${quantity} = ${productTotal} (expecting ${2800 * 3} for correct calculation)`);
             }
             
             // Add delivery price
@@ -2398,8 +2705,13 @@ const OrderManagement = () => {
             const finalTotal = productTotal + deliveryPrice;
             
             console.log(`📊 [ECOTRACK] Final calculation: ${productTotal} DA (product) + ${deliveryPrice} DA (delivery) = ${finalTotal} DA`);
+            console.log(`📊 [ECOTRACK] Expected for quantity ${quantity}: ${unitPrice} × ${quantity} + ${deliveryPrice} = ${(unitPrice * quantity) + deliveryPrice} DA`);
             
-            return finalTotal;
+            // Ensure we always return a valid number
+            const validFinalTotal = isNaN(finalTotal) || finalTotal <= 0 ? (unitPrice + deliveryPrice) : finalTotal;
+            console.log(`📊 [ECOTRACK] Returning final total: ${validFinalTotal} DA`);
+            
+            return validFinalTotal;
           }
           
           // Function to validate commune for EcoTrack
@@ -2463,10 +2775,19 @@ const OrderManagement = () => {
 
           // Validate required fields before sending
           const requiredFields = ['reference', 'client', 'adresse', 'montant'];
-          const missingFields = requiredFields.filter(field => !ecotrackData[field] || ecotrackData[field] === '');
+          const missingFields = requiredFields.filter(field => {
+            const value = ecotrackData[field];
+            if (field === 'montant') {
+              // For montant, only reject if it's null, undefined, empty string, or NaN
+              // Allow 0 as a valid value
+              return value === null || value === undefined || value === '' || isNaN(value);
+            }
+            return !value || value === '';
+          });
           
           if (missingFields.length > 0) {
             console.error(`❌ Missing required fields for order ${order.id}:`, missingFields);
+            console.error(`❌ EcoTrack data for order ${order.id}:`, ecotrackData);
             throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
           }
 
@@ -2779,6 +3100,116 @@ const OrderManagement = () => {
     return colors[status] || "default";
   };
 
+  // Memoized Status cell component to minimize re-renders
+  const StatusCell = React.memo(function StatusCell({ t, status, orderId, isUpdating, onChange, getStatusColor }) {
+    const statusText = t(`orders.statuses.${status}`);
+    const truncatedText = statusText.length > 12 ? statusText.substring(0, 12) + "..." : statusText;
+
+    const statusMenu = (
+      <Menu onClick={({ key }) => onChange(orderId, key)}>
+        <Menu.Item key="pending">{t("orders.statuses.pending")}</Menu.Item>
+        <Menu.Item key="confirmed">{t("orders.statuses.confirmed")}</Menu.Item>
+        <Menu.Item key="processing">{t("orders.statuses.processing")}</Menu.Item>
+        <Menu.Item key="out_for_delivery">{t("orders.statuses.out_for_delivery")}</Menu.Item>
+        <Menu.Item key="delivered">{t("orders.statuses.delivered")}</Menu.Item>
+        <Menu.Item key="cancelled">{t("orders.statuses.cancelled")}</Menu.Item>
+        <Menu.Item key="returned">{t("orders.statuses.returned")}</Menu.Item>
+        <Menu.Item key="on_hold">{t("orders.statuses.on_hold")}</Menu.Item>
+        <Menu.Divider />
+        <Menu.SubMenu title="Tent Status">
+          <Menu.Item key="0_tent">{t("orders.statuses.0_tent") || "0 Tent"}</Menu.Item>
+          <Menu.Item key="1_tent">{t("orders.statuses.1_tent") || "1 Tent"}</Menu.Item>
+          <Menu.Item key="2_tent">{t("orders.statuses.2_tent") || "2 Tent"}</Menu.Item>
+          <Menu.Item key="3_tent">{t("orders.statuses.3_tent") || "3 Tent"}</Menu.Item>
+          <Menu.Item key="4_tent">{t("orders.statuses.4_tent") || "4 Tent"}</Menu.Item>
+          <Menu.Item key="5_tent">{t("orders.statuses.5_tent") || "5 Tent"}</Menu.Item>
+          <Menu.Item key="6_tent">{t("orders.statuses.6_tent") || "6 Tent"}</Menu.Item>
+        </Menu.SubMenu>
+      </Menu>
+    );
+
+    return (
+      <Dropdown overlay={statusMenu} trigger={["click"]} disabled={isUpdating}>
+        <Tag 
+          color={getStatusColor(status)} 
+          size="small" 
+          style={{ cursor: isUpdating ? "not-allowed" : "pointer", maxWidth: "100px", opacity: isUpdating ? 0.6 : 1 }}
+        >
+          <Tooltip title={statusText}>
+            <Space size={4}>
+              {isUpdating && <Spin size="small" />}
+              <span>{truncatedText}</span>
+            </Space>
+          </Tooltip>
+        </Tag>
+      </Dropdown>
+    );
+  });
+
+  // Memoized Variant cell for Excel variants
+  const VariantCell = React.memo(function VariantCell({ t, parsedDetails }) {
+    if (!parsedDetails) {
+      return (
+        <Text type="secondary" style={{ fontSize: "12px" }}>
+          -
+        </Text>
+      );
+    }
+
+    try {
+      const excelVariants = [];
+      if (parsedDetails.variant) excelVariants.push(parsedDetails.variant);
+      if (parsedDetails.size) excelVariants.push(parsedDetails.size);
+      if (parsedDetails.color) excelVariants.push(parsedDetails.color);
+      if (parsedDetails.model) excelVariants.push(parsedDetails.model);
+      if (parsedDetails.style) excelVariants.push(parsedDetails.style);
+
+      if (excelVariants.length === 0) {
+        return (
+          <Tooltip title={t("orders.noVariantFromExcel")}>
+            <Tag color="default" size="small" style={{ fontSize: "11px" }}>
+              {t("orders.noVariant")}
+            </Tag>
+          </Tooltip>
+        );
+      }
+
+      const variantText = excelVariants.join(", ");
+      const displayText = variantText.length > 15 ? variantText.substring(0, 15) + "..." : variantText;
+
+      return (
+        <Tooltip 
+          title={
+            <div>
+              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
+                📋 {t("orders.variantExcelData")}:
+              </div>
+              <div style={{ fontSize: '12px' }}>
+                {excelVariants.map((variant, index) => (
+                  <div key={index}>• {variant}</div>
+                ))}
+              </div>
+              <div style={{ fontSize: '11px', color: '#999', marginTop: 4, fontStyle: 'italic' }}>
+                {t("orders.variantExcelNote")}
+              </div>
+            </div>
+          }
+          placement="topLeft"
+        >
+          <Tag color="orange" size="small" style={{ fontSize: "11px", cursor: "pointer" }}>
+            📋 {displayText}
+          </Tag>
+        </Tooltip>
+      );
+    } catch (error) {
+      return (
+        <Text type="secondary" style={{ fontSize: "12px" }}>
+          -
+        </Text>
+      );
+    }
+  });
+
   const getAssignmentMenu = (record) => {
     return (
       <Menu onClick={({ key }) => handleAssignOrder(record.id, key)}>
@@ -2834,7 +3265,7 @@ const OrderManagement = () => {
     );
   };
 
-  const columns = [
+  const columns = React.useMemo(() => [
     {
       title: t("orders.orderNumber"),
       dataIndex: "order_number",
@@ -2843,17 +3274,8 @@ const OrderManagement = () => {
       fixed: 'left',
       render: (orderNumber, record) => {
         // Check if order has variant information
-        let hasVariant = false;
-        try {
-          if (record.product_details) {
-            const productDetails = typeof record.product_details === 'string' 
-              ? JSON.parse(record.product_details) 
-              : record.product_details;
-            hasVariant = !!(productDetails.variant || productDetails.size || productDetails.color || productDetails.model || productDetails.style);
-          }
-        } catch (error) {
-          // Ignore parsing errors
-        }
+        const productDetails = parsedProductDetailsById.get(record.id);
+        const hasVariant = !!(productDetails && (productDetails.variant || productDetails.size || productDetails.color || productDetails.model || productDetails.style));
 
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -2886,8 +3308,49 @@ const OrderManagement = () => {
         );
       },
     },
-    {
-      title: t("orders.customerPhone"),
+/* removed: stray variant renderer
+              render: (_, record) => {
+                try {
+                  const productDetails = parsedProductDetailsById.get(record.id);
+                  // Get Excel variant information
+                  const excelVariants = [];
+                  if (productDetails?.variant) excelVariants.push(productDetails.variant);
+                  if (productDetails?.size) excelVariants.push(productDetails.size);
+                  if (productDetails?.color) excelVariants.push(productDetails.color);
+                  if (productDetails?.model) excelVariants.push(productDetails.model);
+                  if (productDetails?.style) excelVariants.push(productDetails.style);
+
+                  if (excelVariants.length === 0) {
+                    return (
+                      <Tooltip title={t("orders.noVariantFromExcel")}>
+                        <Tag color="default" size="small" style={{ fontSize: "11px" }}>
+                          {t("orders.noVariant")}
+                        </Tag>
+                      </Tooltip>
+                    );
+                  }
+
+                  const variantText = excelVariants.join(", ");
+                  const displayText = variantText.length > 15 ? variantText.substring(0, 15) + "..." : variantText;
+          
+                  return (
+                    <Tooltip title={variantText}>
+                      <Text style={{ fontSize: '12px' }}>📋 {displayText}</Text>
+                    </Tooltip>
+                  );
+                } catch (_) {
+                  return (
+                    <Tooltip title={t("orders.noVariantFromExcel")}>
+                      <Tag color="default" size="small" style={{ fontSize: "11px" }}>
+                        {t("orders.noVariant")}
+                      </Tag>
+                    </Tooltip>
+                  );
+                }
+        },
+*/
+  {
+  title: t("orders.customerPhone"),
       dataIndex: "customer_phone",
       key: "customer_phone",
       width: 120,
@@ -2898,7 +3361,7 @@ const OrderManagement = () => {
           <Text>{text}</Text>
         </Tooltip>
       ),
-    },
+  },
     {
       title: t("orders.customerCity"),
       dataIndex: "customer_city",
@@ -2930,47 +3393,16 @@ const OrderManagement = () => {
       dataIndex: "status",
       key: "status",
       width: 120,
-      render: (status, record) => {
-        const statusText = t(`orders.statuses.${status}`);
-        const truncatedText = statusText.length > 12 ? statusText.substring(0, 12) + "..." : statusText;
-        
-        const statusMenu = (
-          <Menu onClick={({ key }) => handleStatusChange(record.id, key)}>
-            <Menu.Item key="pending">{t("orders.statuses.pending")}</Menu.Item>
-            <Menu.Item key="confirmed">{t("orders.statuses.confirmed")}</Menu.Item>
-            <Menu.Item key="processing">{t("orders.statuses.processing")}</Menu.Item>
-            <Menu.Item key="out_for_delivery">{t("orders.statuses.out_for_delivery")}</Menu.Item>
-            <Menu.Item key="delivered">{t("orders.statuses.delivered")}</Menu.Item>
-            <Menu.Item key="cancelled">{t("orders.statuses.cancelled")}</Menu.Item>
-            <Menu.Item key="returned">{t("orders.statuses.returned")}</Menu.Item>
-            <Menu.Item key="on_hold">{t("orders.statuses.on_hold")}</Menu.Item>
-            <Menu.Divider />
-            <Menu.SubMenu title="Tent Status">
-              <Menu.Item key="0_tent">{t("orders.statuses.0_tent") || "0 Tent"}</Menu.Item>
-              <Menu.Item key="1_tent">{t("orders.statuses.1_tent") || "1 Tent"}</Menu.Item>
-              <Menu.Item key="2_tent">{t("orders.statuses.2_tent") || "2 Tent"}</Menu.Item>
-              <Menu.Item key="3_tent">{t("orders.statuses.3_tent") || "3 Tent"}</Menu.Item>
-              <Menu.Item key="4_tent">{t("orders.statuses.4_tent") || "4 Tent"}</Menu.Item>
-              <Menu.Item key="5_tent">{t("orders.statuses.5_tent") || "5 Tent"}</Menu.Item>
-              <Menu.Item key="6_tent">{t("orders.statuses.6_tent") || "6 Tent"}</Menu.Item>
-            </Menu.SubMenu>
-          </Menu>
-        );
-
-        return (
-          <Dropdown overlay={statusMenu} trigger={["click"]}>
-            <Tag 
-              color={getStatusColor(status)} 
-              size="small" 
-              style={{ cursor: "pointer", maxWidth: "100px" }}
-            >
-              <Tooltip title={statusText}>
-                {truncatedText}
-              </Tooltip>
-            </Tag>
-          </Dropdown>
-        );
-      },
+      render: (status, record) => (
+        <StatusCell
+          t={t}
+          status={status}
+          orderId={record.id}
+          isUpdating={updatingStatusId === record.id}
+          onChange={handleStatusChange}
+          getStatusColor={getStatusColor}
+        />
+      ),
     },
     {
       title: t("orders.totalAmount"),
@@ -3169,73 +3601,9 @@ const OrderManagement = () => {
       key: "variant_excel",
       width: 140,
       responsive: ["lg"],
-      render: (_, record) => {
-        if (!record.product_details) {
-          return (
-            <Text type="secondary" style={{ fontSize: "12px" }}>
-              -
-            </Text>
-          );
-        }
-
-        try {
-          const productDetails = typeof record.product_details === 'string' 
-            ? JSON.parse(record.product_details) 
-            : record.product_details;
-
-          // Get Excel variant information
-          const excelVariants = [];
-          if (productDetails.variant) excelVariants.push(productDetails.variant);
-          if (productDetails.size) excelVariants.push(`Taille: ${productDetails.size}`);
-          if (productDetails.color) excelVariants.push(`Couleur: ${productDetails.color}`);
-          if (productDetails.model) excelVariants.push(`Modèle: ${productDetails.model}`);
-          if (productDetails.style) excelVariants.push(`Style: ${productDetails.style}`);
-
-          if (excelVariants.length === 0) {
-            return (
-              <Tooltip title={t("orders.noVariantFromExcel")}>
-                <Tag color="default" size="small" style={{ fontSize: "11px" }}>
-                  {t("orders.noVariant")}
-                </Tag>
-              </Tooltip>
-            );
-          }
-
-          const variantText = excelVariants.join(", ");
-          const displayText = variantText.length > 15 ? variantText.substring(0, 15) + "..." : variantText;
-          
-          return (
-            <Tooltip 
-              title={
-                <div>
-                  <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
-                    📋 {t("orders.variantExcelData")}:
-                  </div>
-                  <div style={{ fontSize: '12px' }}>
-                    {excelVariants.map((variant, index) => (
-                      <div key={index}>• {variant}</div>
-                    ))}
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#999', marginTop: 4, fontStyle: 'italic' }}>
-                    {t("orders.variantExcelNote")}
-                  </div>
-                </div>
-              }
-              placement="topLeft"
-            >
-              <Tag color="orange" size="small" style={{ fontSize: "11px", cursor: "pointer" }}>
-                📋 {displayText}
-              </Tag>
-            </Tooltip>
-          );
-        } catch (error) {
-          return (
-            <Text type="secondary" style={{ fontSize: "12px" }}>
-              -
-            </Text>
-          );
-        }
-      },
+      render: (_, record) => (
+        <VariantCell t={t} parsedDetails={parsedProductDetailsById.get(record.id)} />
+      ),
     },
     ...(ecotrackEnabled
       ? [
@@ -3354,241 +3722,60 @@ const OrderManagement = () => {
             type="link"
             size="small"
             icon={<EditOutlined />}
-            onClick={async () => {
+            onClick={() => {
+              // Open modal immediately for fast UX
               setEditingOrder(record);
-              
-              // Parse product_details if it exists and is valid JSON
+              setModalVisible(true);
+
+              // Parse product_details quickly (non-blocking work only)
               let productInfo = {};
-              if (record.product_details) {
-                try {
-                  const parsed = typeof record.product_details === 'string' 
-                    ? JSON.parse(record.product_details) 
+              try {
+                if (record.product_details) {
+                  const parsed = typeof record.product_details === 'string'
+                    ? JSON.parse(record.product_details)
                     : record.product_details;
-                  
-                  // If it's already an object with the expected structure, use it
                   if (parsed && typeof parsed === 'object') {
                     productInfo = parsed;
                   }
-                } catch (error) {
-                  console.warn('Could not parse product_details as JSON:', error);
-                  // If parsing fails, extract info from string - this is the variant name from Excel
-                  const productText = record.product_details.toString();
-                  productInfo = { 
-                    name: productText,
-                    variant: productText,
-                    description: productText,
-                    original_product_text: productText
-                  };
-                  console.log('🔍 Treated product_details as variant text:', productText);
                 }
-              }
-
-              // Debug: Log the record and product info
-              console.log('🔍 Debug Order Record:', {
-                id: record.id,
-                customer_name: record.customer_name,
-                product_details: record.product_details,
-                product_details_type: typeof record.product_details,
-                notes: record.notes,
-                productInfo: productInfo
-              });
-
-              // Additional fallback: If still no productInfo but we have product_details, use it directly
-              if (record.product_details && Object.keys(productInfo).length === 0) {
-                console.log('🔍 Final fallback: using product_details directly as variant');
-                const productText = record.product_details.toString();
+              } catch (error) {
+                const productText = String(record.product_details || '');
                 productInfo = {
                   name: productText,
                   variant: productText,
                   description: productText,
                   original_product_text: productText
                 };
-                console.log('🔍 Fallback result:', productInfo);
               }
 
-              // TEST: If no product info found, create test data to verify the notes system works
-              if (!productInfo || Object.keys(productInfo).length === 0) {
-                console.log('🧪 No product info found - creating test data for order', record.id);
-                productInfo = {
-                  name: 'Test Product Name',
-                  variant: 'Test Variant from Excel',
-                  description: 'This is a test to verify the notes system works',
-                  original_product_text: 'Test Excel Product Entry',
-                  size: 'XL',
-                  color: 'Blue'
-                };
-                console.log('🧪 Test productInfo created:', productInfo);
-              }
-
-              // Try to find matching product first
-              let matchedProduct = null;
-              if (productInfo.name) {
-                try {
-                  matchedProduct = await autoSelectProductByName(productInfo.name);
-                } catch (error) {
-                  console.warn('❌ Error during product auto-selection:', error);
-                }
-              }
-
-              // Generate Excel variant notes with matched product info
-              const excelVariantNotes = generateExcelVariantNotes(productInfo, matchedProduct);
-              
-              console.log('🔍 Generated variant notes:', excelVariantNotes);
-              
-              // Combine existing notes with Excel variant information
-              let combinedNotes = record.notes || '';
-              if (excelVariantNotes) {
-                // Since excelVariantNotes now contains just the variant value (e.g., "maroon"),
-                // we add it simply to the existing notes
-                if (combinedNotes.trim()) {
-                  // Check if variant is already in the notes to avoid duplication
-                  if (!combinedNotes.includes(excelVariantNotes)) {
-                    combinedNotes = combinedNotes.trim() + ' ' + excelVariantNotes;
-                  }
-                } else {
-                  combinedNotes = excelVariantNotes;
-                }
-              }
-              
-              console.log('🔍 Combined notes result:', {
-                originalNotes: record.notes,
-                excelVariantNotes: excelVariantNotes,
-                combinedNotes: combinedNotes,
-                notesLength: combinedNotes.length
+              // Set initial form values immediately
+              const deliveryPrice = parseFloat(record.delivery_price || 0);
+              form.setFieldsValue({
+                ...record,
+                product_info: productInfo,
+                notes: record.notes || '',
+                delivery_price: deliveryPrice,
               });
+              setCurrentDeliveryType(record.delivery_type || 'home');
 
-              // Set modal visible first
-              setModalVisible(true);
-
-              // Set initial form values with a small delay to ensure the form is ready
+              // Defer any non-critical work so UI stays snappy
               setTimeout(() => {
-                console.log('🔧 Setting form values with notes:', combinedNotes);
-                console.log('🔧 Form values being set:', {
-                  ...record,
-                  product_info: productInfo,
-                  notes: combinedNotes
-                });
-                
-                // Ensure delivery_price is properly set
-                const deliveryPrice = parseFloat(record.delivery_price || 0);
-                const totalAmount = parseFloat(record.total_amount || 0);
-                
-                console.log('🔧 [DEBUG] Setting form with delivery_price:', deliveryPrice);
-                
-                console.log('� [DEBUG] Using original delivery_price from database:', deliveryPrice);
-                
-                form.setFieldsValue({
-                  ...record,
-                  product_info: productInfo,
-                  notes: combinedNotes, // Use combined notes with Excel variant info
-                  delivery_price: deliveryPrice // Explicitly set delivery price
-                });
-                
-                // Set current delivery type for conditional rendering
-                setCurrentDeliveryType(record.delivery_type || 'home');
-                
-                console.log('✅ [DEBUG] Form populated with delivery_price:', deliveryPrice);
-                console.log('✅ [DEBUG] Current delivery type set to:', record.delivery_type || 'home');
-                
-                // Force recalculation of delivery price after form is set
-                setTimeout(() => {
-                  console.log('🔄 [DEBUG] Force recalculating delivery price after form initialization');
-                  calculateDeliveryPrice();
-                }, 300);
-                
-                // After form is set, try to get more precise price from API if needed
-                if (record.wilaya_id) {
-                  setTimeout(async () => {
-                    try {
-                      const pricingData = {
-                        wilaya_id: record.wilaya_id,
-                        delivery_type: record.delivery_type || "home", // Use actual delivery type
-                        weight: 1,
-                        pricing_level: "wilaya"
-                      };
-                      
-                      console.log('📡 [DEBUG] Getting precise API price with correct delivery type:', pricingData);
-                      const response = await orderService.calculateDeliveryPrice(pricingData);
-                      
-                      if (response.success && response.data) {
-                        const apiPrice = response.data.price || response.data.delivery_price || 0;
-                        const currentPrice = parseFloat(form.getFieldValue('delivery_price') || 0);
-                        
-                        if (apiPrice >= 50 && apiPrice <= 1600 && apiPrice !== currentPrice) {
-                          console.log('🎯 [DEBUG] Updating with precise API price:', apiPrice);
-                          form.setFieldsValue({ delivery_price: apiPrice });
-                          message.success(`Prix mis à jour via API: ${apiPrice} DA`);
-                        }
-                      }
-                    } catch (error) {
-                      console.error('❌ [DEBUG] API call failed:', error);
-                    }
-                  }, 1000);
-                }
-                
-                // Load baladias if order has a wilaya
+                // Load baladias if order has a wilaya (async chain but doesn't block modal)
                 if (record.wilaya_id) {
                   handleAutoWilayaSelection(record.wilaya_id);
-                  
-                  // If order has baladia_id, load baladias for that wilaya
                   if (record.baladia_id) {
                     fetchBaladias(record.wilaya_id).then(() => {
-                      // Set the baladia after baladias are loaded
-                      setTimeout(() => {
-                        form.setFieldsValue({ 
-                          baladia_id: record.baladia_id,
-                          baladia_name: record.baladia_name 
-                        });
-                      }, 100);
+                      form.setFieldsValue({
+                        baladia_id: record.baladia_id,
+                        baladia_name: record.baladia_name,
+                      });
                     });
                   }
                 }
-                
-                // Force a form update to trigger re-render
-                setTimeout(() => {
-                  form.setFieldsValue({ notes: combinedNotes });
-                  console.log('🔄 Forced notes update to trigger re-render');
-                }, 100);
-                
-                // Verify the form value was set - with more detailed logging
-                setTimeout(() => {
-                  const currentFormNotes = form.getFieldValue('notes');
-                  console.log('✅ Form notes value after setting:', currentFormNotes);
-                  console.log('🔍 Notes length:', currentFormNotes?.length || 0);
-                  console.log('🔍 Notes preview (first 200 chars):', currentFormNotes?.substring(0, 200));
-                  console.log('🔍 Contains variant info?:', currentFormNotes?.includes('VARIANTES EXCEL'));
-                  // console.log('🔍 Contains automatic info?:', currentFormNotes?.includes('INFORMATIONS PRODUIT AUTOMATIQUES'));
-                  
-                  // Force a form update to ensure the UI reflects the change
-                  form.setFieldsValue({ notes: currentFormNotes });
-                }, 200);
-              }, 100);
-              
-              // Handle additional setup after modal is ready
-              setTimeout(async () => {
-                if (!matchedProduct && productInfo.name) {
-                  // Show notification that product was not found in database
-                  message.info(`Product "${productInfo.name}" from Excel not found in product database. Please select manually.`, 5);
-                }
 
-                // Auto-select variant from Excel import data
-                if (productInfo) {
-                  try {
-                    const variantInfo = await autoSelectVariantFromExcel(productInfo);
-                    if (variantInfo) {
-                      console.log('✅ Auto-selected variant info:', variantInfo);
-                      if (variantInfo.matched_variant_name) {
-                        console.log('🎯 Matched with store variant:', variantInfo.matched_variant_name);
-                      }
-                    }
-                  } catch (error) {
-                    console.warn('❌ Error during variant auto-selection:', error);
-                  }
-                }
-                
-                // Update final total after form is populated
-                updateFinalTotal();
-              }, 300);
+                // Update totals cheaply
+                try { updateFinalTotal(); } catch (_) {}
+              }, 0);
             }}
           />
           {ecotrackEnabled && record.ecotrack_tracking_id && (
@@ -3602,7 +3789,7 @@ const OrderManagement = () => {
             </Tooltip>
           )}
           {canAssignOrders && (
-            <Dropdown overlay={getAssignmentMenu(record)} trigger={["click"]}>
+            <Dropdown overlay={getAssignmentMenu(record)} trigger={["click"]} onOpenChange={(open) => { if (open) ensureUsers(); }}>
               <Tooltip title={t("orders.assignTooltip")}>
                 <Button
                   type="primary"
@@ -3634,7 +3821,27 @@ const OrderManagement = () => {
         </Space>
       ),
     },
-  ];
+  ], [t, parsedProductDetailsById, getStatusColor, ecotrackEnabled, canAssignOrders, ensureUsers, handleStatusChange, showTrackingModal, handleDeleteOrder]);
+
+  // Virtualized body for large tables
+  const VirtualBody = React.useCallback((props) => {
+    const { children, ...restProps } = props;
+    // rc-virtual-list expects data and render item; adapt Ant Table body rows
+    const rows = React.Children.toArray(children);
+    const itemCount = rows.length;
+    const itemHeight = 42; // approximate row height; tweak as needed
+
+    return (
+      <VirtualList 
+        data={rows} 
+        height={Math.min(600, itemCount * itemHeight)} 
+        itemHeight={itemHeight} 
+        itemKey={(row, index) => (row && row.key != null ? row.key : index)}
+      >
+        {(row) => row}
+      </VirtualList>
+    );
+  }, []);
 
   return (
     <div className="orders-page">
@@ -3755,8 +3962,8 @@ const OrderManagement = () => {
                 {t('orders.selectedCount', { count: selectedRowKeys.length })}
               </Text>
             </Col>
-            <Col>
-              <Space>
+            <Col flex="auto">
+              <Space wrap>
                 <Button
                   type="primary"
                   icon={<TruckOutlined />}
@@ -3765,6 +3972,43 @@ const OrderManagement = () => {
                 >
                   {t('orders.sendToDelivery')}
                 </Button>
+                
+                {canAssignOrders && (
+                  <Space.Compact>
+                    <Select
+                      style={{ width: 160 }}
+                      placeholder={t('orders.selectAssignee')}
+                      value={bulkAssignedTo}
+                      onChange={setBulkAssignedTo}
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                      loading={usersLoading}
+                      onDropdownVisibleChange={(open) => { if (open) ensureUsers(); }}
+                      options={(Array.isArray(users) ? users : []).map(u => ({
+                        label: `${u.first_name} ${u.last_name}`,
+                        value: u.id
+                      }))}
+                    />
+                    <Button
+                      type="primary"
+                      icon={<UserAddOutlined />}
+                      onClick={handleBulkAssign}
+                      disabled={!bulkAssignedTo}
+                      loading={loading}
+                    >
+                      {t('orders.bulkAssign')}
+                    </Button>
+                    <Button
+                      icon={<UserOutlined />}
+                      onClick={handleBulkUnassign}
+                      loading={loading}
+                    >
+                      {t('orders.bulkUnassign')}
+                    </Button>
+                  </Space.Compact>
+                )}
+                
                 <Button
                   icon={<CheckCircleOutlined />}
                   onClick={handleSelectAll}
@@ -3957,24 +4201,25 @@ const OrderManagement = () => {
       <Card>
         <Table
           columns={columns}
-          dataSource={filteredOrders.slice(
+          dataSource={React.useMemo(() => derivedFilteredOrders.slice(
             (pagination.current - 1) * pagination.pageSize,
             pagination.current * pagination.pageSize
-          )}
+          ), [derivedFilteredOrders, pagination.current, pagination.pageSize])}
           rowKey="id"
           loading={loading}
           size="small"
-          rowSelection={{
+          components={{
+            body: VirtualBody
+          }}
+          rowSelection={React.useMemo(() => ({
             selectedRowKeys,
             onChange: handleRowSelectionChange,
-            getCheckboxProps: (record) => ({
-              disabled: record.status !== 'confirmed', // Only enable selection for confirmed orders
-            }),
-          }}
+            getCheckboxProps: () => ({ disabled: false }),
+          }), [selectedRowKeys, handleRowSelectionChange])}
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
-            total: filteredOrders.length, // Use filtered orders length
+            total: derivedFilteredOrders.length, // Use filtered orders length
             showSizeChanger: true,
             showQuickJumper: true,
             responsive: true,
@@ -4006,11 +4251,9 @@ const OrderManagement = () => {
           layout="vertical"
           onFinish={editingOrder ? handleUpdateOrder : handleCreateOrder}
           onValuesChange={(changedValues, allValues) => {
-            // Debug: Log form value changes
             if (changedValues.delivery_type) {
               console.log('🚚 Delivery type changed:', changedValues.delivery_type);
             }
-            // Ensure form values are properly stored
             if (Object.keys(changedValues).length > 0) {
               console.log('📝 Form values changed:', changedValues);
             }
@@ -4046,9 +4289,6 @@ const OrderManagement = () => {
           <Form.Item
             name="customer_address"
             label={t("orders.customerAddress")}
-            // rules={[
-            //   { required: true, message: t("orders.customerAddressRequired") },
-            // ]}
           >
             <TextArea rows={2} />
           </Form.Item>
@@ -4071,19 +4311,14 @@ const OrderManagement = () => {
                   <Select
                     placeholder={t("delivery.selectWilaya")}
                     showSearch
-                    optionFilterProp="children"
+                    optionFilterProp="label"
                     onChange={handleWilayaChange}
                     loading={loadingWilayas}
-                    filterOption={(input, option) =>
-                      option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-                    }
-                  >
-                    {wilayas.map((wilaya) => (
-                      <Option key={wilaya.id} value={wilaya.id}>
-                        {wilaya.code} - {wilaya.name_fr}
-                      </Option>
-                    ))}
-                  </Select>
+                    options={wilayas.map(w => ({
+                      label: `${w.code} - ${w.name_fr}`,
+                      value: w.id
+                    }))}
+                  />
                 </Form.Item>
               </Col>
               <Col span={6}>
@@ -4099,24 +4334,17 @@ const OrderManagement = () => {
                   <Select
                     placeholder="Select Baladia"
                     showSearch
-                    optionFilterProp="children"
+                    optionFilterProp="label"
                     onChange={handleBaladiaChange}
                     loading={loadingBaladias}
                     allowClear
                     disabled={!selectedWilaya}
-                    filterOption={(input, option) =>
-                      option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-                    }
-                  >
-                    {baladias.map((baladia) => {
-                      const name = baladia.name_en || baladia.name_fr || baladia.name_ar;
-                      return (
-                        <Option key={baladia.id} value={baladia.id}>
-                          {name}
-                        </Option>
-                      );
-                    })}
-                  </Select>
+                    notFoundContent={loadingBaladias ? <Spin size="small" /> : null}
+                    options={baladias.map(b => ({
+                      label: b.name_en || b.name_fr || b.name_ar,
+                      value: b.id
+                    }))}
+                  />
                 </Form.Item>
               </Col>
               <Col span={6}>
@@ -4134,17 +4362,12 @@ const OrderManagement = () => {
                   <Select 
                     placeholder={t("delivery.selectType")}
                     onChange={(value) => handleDeliveryFieldChange(value, 'delivery_type')}
-                  >
-                    <Option value="home">
-                       {t("delivery.types.home")} (À domicile)
-                    </Option>
-                    <Option value="stop_desk">
-                       Stop Desk (Point de collecte)
-                    </Option>
-                    <Option value="les_changes">
-                       les changes
-                    </Option>
-                  </Select>
+                    options={[
+                      { value: 'home', label: `${t("delivery.types.home")} (À domicile)` },
+                      { value: 'stop_desk', label: 'Stop Desk (Point de collecte)' },
+                      { value: 'les_changes', label: 'les changes' }
+                    ]}
+                  />
                 </Form.Item>
               </Col>
               
@@ -4186,7 +4409,6 @@ const OrderManagement = () => {
                       if (typeof children === 'string') {
                         return children.toLowerCase().includes(input.toLowerCase());
                       }
-                      // Handle cases where children might be a React element or other type
                       const childrenStr = String(children || '');
                       return childrenStr.toLowerCase().includes(input.toLowerCase());
                     }}
@@ -4234,7 +4456,7 @@ const OrderManagement = () => {
                       borderColor: currentDeliveryType === 'les_changes' ? '#52c41a' : undefined
                     }}
                     min={0}
-                    disabled={false} // Always enabled, but visual feedback for manual entry
+                    disabled={false}
                     onChange={(e) => {
                       const value = e.target.value;
                       console.log('🚚 Changement manuel du prix de livraison:', value);
@@ -4248,7 +4470,6 @@ const OrderManagement = () => {
               </Col>
             </Row>
           </Card>
-
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
@@ -4836,105 +5057,53 @@ const OrderManagement = () => {
           )}
           <Form.Item dependencies={['notes']} noStyle>
             {({ getFieldValue }) => {
-              const currentNotes = getFieldValue('notes');
-              const hasExcelVariant = currentNotes && (currentNotes.includes('📋 VARIANTE EXCEL:') 
-              // || currentNotes.includes('📋 INFORMATIONS PRODUIT AUTOMATIQUES')
-            );
-              
               return (
                 <Form.Item name="notes" label={t("orders.notes")}>
-                  <div>
-                    <TextArea 
-                      rows={hasExcelVariant ? 8 : 3}
-                      placeholder={t("orders.notesPlaceholder")}
-                      value={currentNotes}
-                      onChange={(e) => {
-                        // Update form field when user types
-                        form.setFieldsValue({ notes: e.target.value });
-                      }}
-                      style={{
-                        backgroundColor: hasExcelVariant ? '#fff7e6' : undefined,
-                        borderColor: hasExcelVariant ? '#ffa940' : undefined,
-                        minHeight: hasExcelVariant ? '200px' : '80px',
-                      }}
-                    />
-                    <div style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      marginTop: '4px' 
-                    }}>
-                      <div style={{ 
-                        fontSize: '12px', 
-                        color: '#fa8c16', 
-                        fontStyle: 'italic'
-                      }}>
-                        💡 {t("orders.notesContainExcelVariant")}
-                      </div>
-                      <Button 
-                        size="small" 
-                        type="link" 
-                        icon={<SyncOutlined />}
-                        onClick={async () => {
-                          const currentProductInfo = form.getFieldValue('product_info');
-                          if (currentProductInfo) {
-                            // Try to find matching product
-                            let matchedProduct = null;
-                            if (currentProductInfo.name) {
-                              try {
-                                matchedProduct = await autoSelectProductByName(currentProductInfo.name);
-                              } catch (error) {
-                                console.warn('Error during product auto-selection:', error);
-                              }
-                            }
-
-                            // Generate updated notes
-                            const updatedVariantNotes = generateExcelVariantNotes(currentProductInfo, matchedProduct);
-                            
-                            if (updatedVariantNotes) {
-                              const currentNotes = form.getFieldValue('notes') || '';
-                              
-                              // Simple approach: add variant if not already present
-                              let newNotes;
-                              if (currentNotes.trim()) {
-                                // Check if variant is already in the notes to avoid duplication
-                                if (!currentNotes.includes(updatedVariantNotes)) {
-                                  newNotes = currentNotes.trim() + ' ' + updatedVariantNotes;
-                                } else {
-                                  newNotes = currentNotes; // Already present, no change needed
-                                  message.info('La variante est déjà présente dans les notes');
-                                  return;
-                                }
-                              } else {
-                                newNotes = updatedVariantNotes;
-                              }
-                              
-                              // Update the form field
-                              form.setFieldsValue({ notes: newNotes });
-                              message.success('Variante ajoutée aux notes: ' + updatedVariantNotes);
-                            } else {
-                              message.warning('Aucune information de variante trouvée à ajouter aux notes');
-                            }
-                          } else {
-                            message.warning('Aucune information produit trouvée pour générer les notes');
-                          }
-                        }}
-                        style={{ 
-                          fontSize: '12px', 
-                          padding: '0 8px',
-                          color: '#fa8c16'
-                        }}
-                      >
-                        Actualiser variantes
-                      </Button>
-                  
-                 
-                    </div>
-                  </div>
+                  <TextArea 
+                    rows={3}
+                    placeholder={t("orders.notesPlaceholder")}
+                    onChange={(e) => {
+                      // Update form field when user types
+                      form.setFieldsValue({ notes: e.target.value });
+                    }}
+                  />
                 </Form.Item>
               );
             }}
           </Form.Item>
+          
+          {/* Hidden fields to preserve Excel variant information during updates */}
+          <Form.Item name={['product_info', 'variant']} hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item name={['product_info', 'size']} hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item name={['product_info', 'color']} hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item name={['product_info', 'model']} hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item name={['product_info', 'style']} hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item name={['product_info', 'original_product_text']} hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item name={['product_info', 'matched_variant_size']} hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item name={['product_info', 'matched_variant_color']} hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item name={['product_info', 'matched_variant_model']} hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item name={['product_info', 'matched_variant_style']} hidden>
+            <Input />
+          </Form.Item>
+          
           <Form.Item>
             <Space>
               <Button type="primary" htmlType="submit">
@@ -4952,6 +5121,7 @@ const OrderManagement = () => {
             </Space>
           </Form.Item>
         </Form>
+        
       </Modal>
 
       {/* Import Modal */}

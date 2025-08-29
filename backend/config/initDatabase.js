@@ -39,7 +39,7 @@ class Database {
           customer_city VARCHAR(50) NOT NULL,
           product_details JSON NOT NULL,
           total_amount DECIMAL(10,2) NOT NULL,
-          status ENUM('pending', 'confirmed', 'processing', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'on_hold', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent') DEFAULT 'pending',
+          status ENUM('pending', 'confirmed', 'import_to_delivery_company', 'processing', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'on_hold', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent') DEFAULT 'pending',
           payment_status ENUM('unpaid', 'cod_pending', 'paid') DEFAULT 'unpaid',
           assigned_to INT,
           confirmed_by INT,
@@ -223,8 +223,8 @@ class Database {
       
       // Add missing status values to the enum including tent statuses
       await pool.query(`
-        ALTER TABLE orders MODIFY COLUMN status 
-        ENUM('pending', 'confirmed', 'processing', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'on_hold', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent') 
+  ALTER TABLE orders MODIFY COLUMN status 
+  ENUM('pending', 'confirmed', 'import_to_delivery_company', 'processing', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'on_hold', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent') 
         DEFAULT 'pending'
       `);
       

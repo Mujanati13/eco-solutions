@@ -70,7 +70,7 @@ const schemas = {
     customer_email: Joi.string().email().optional(),
     weight: Joi.number().positive().optional(),
     volume: Joi.number().min(0).optional(),
-    status: Joi.string().valid('pending', 'confirmed', 'processing', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'on_hold').optional(),
+  status: Joi.string().valid('pending', 'confirmed', 'import_to_delivery_company', 'processing', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'on_hold').optional(),
     payment_status: Joi.string().valid('unpaid', 'cod_pending', 'paid').optional(),
     final_total: Joi.number().min(0).precision(2).optional()
   }),
@@ -99,7 +99,7 @@ const schemas = {
     pricing_level: Joi.string().valid('wilaya', 'baladia').optional(),
     
     // Order status and workflow
-    status: Joi.string().valid('pending', 'confirmed', 'processing', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'on_hold', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent').optional(),
+  status: Joi.string().valid('pending', 'confirmed', 'import_to_delivery_company', 'processing', 'out_for_delivery', 'delivered', 'cancelled', 'returned', 'on_hold', '0_tent', '1_tent', '2_tent', '3_tent', '4_tent', '5_tent', '6_tent').optional(),
     payment_status: Joi.string().valid('unpaid', 'cod_pending', 'paid').optional(),
     assigned_to: Joi.number().integer().optional(),
     delivery_date: Joi.date().optional(),

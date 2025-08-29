@@ -183,12 +183,12 @@ class EcotrackMultiAccountService {
         client: orderData.customer_name || 'Customer',
         phone: (orderData.customer_phone?.replace(/\D/g, '') || '0555123456').substring(0, 10),
         phone_2: orderData.customer_phone_2 ? orderData.customer_phone_2.replace(/\D/g, '').substring(0, 10) : undefined,
-        adresse: orderData.customer_address || orderData.customer_city || 'Address',
+        adresse: orderData.customer_address || `${orderData.customer_city || 'Ville'}, ${orderData.commune || orderData.customer_city || 'Commune'}` || 'Adresse non spécifiée',
         wilaya_id: orderData.wilaya_id || 16, // Default to Algiers
         commune: orderData.commune || orderData.customer_city || 'Commune',
         montant: parseFloat(orderData.total_amount) || 0,
-        remarque: this.cleanRemarque(orderData.notes || '', orderData.quantity),
-        produit: productDetails.name || 'Product',
+        remarque: this.cleanRemarque(orderData.notes || '', orderData.quantity_ordered || orderData.quantity),
+        produit: productDetails.name || 'Product', // Required
         type_id: typeId, // Dynamic based on delivery_type (1: Livraison, 2: Échange, 3: Pick up)
         poids: Math.max(1, Math.floor(orderData.weight || productDetails.weight || 1)),
         stop_desk: 0, // Home delivery
@@ -537,14 +537,40 @@ class EcotrackMultiAccountService {
       // Remove potential product name patterns
       cleanNotes = cleanNotes.replace(/^[A-Z\s]+[A-Z]+$/g, '').trim(); // Remove all-caps product names
       cleanNotes = cleanNotes.replace(/\b[A-Z]{2,}\s+[A-Z]{2,}[A-Z\s]*\b/g, '').trim(); // Remove patterns like "WOMEN CAT LUNETTE"
+      cleanNotes = cleanNotes.replace(/\b[A-Z]+\s+[A-Z]+\s+[A-Z]+\b/g, '').trim(); // Remove 3+ word uppercase patterns
+      cleanNotes = cleanNotes.replace(/^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+.*$/g, '').trim(); // Remove title case product names
+      
+      // Remove specific product name patterns
+      cleanNotes = cleanNotes.replace(/.*WOMEN.*CAT.*LUNETTE.*/gi, '').trim();
+      cleanNotes = cleanNotes.replace(/.*ENSEMBLE.*FEMME.*/gi, '').trim();
+      cleanNotes = cleanNotes.replace(/.*MONTRE.*FEMME.*/gi, '').trim();
+      cleanNotes = cleanNotes.replace(/.*PARFUM.*HOMME.*/gi, '').trim();
+      cleanNotes = cleanNotes.replace(/.*MATLERXS.*/gi, '').trim();
+      cleanNotes = cleanNotes.replace(/.*[A-Z]{3,}.*\d{3,}.*/gi, '').trim(); // Remove patterns like MATLERXS 2517
+      cleanNotes = cleanNotes.replace(/.*originale.*/gi, '').trim();
     
       // Split by common separators and remove duplicates
       const noteParts = cleanNotes.split(/[|,;]/).map(part => part.trim()).filter(part => part.length > 1);
       const addedPartsLower = new Set(['quantité', 'colis ouvrable']); // Track what we've already added
       
       for (const part of noteParts) {
-        // Skip parts that look like product names (all uppercase, multiple words)
-        if (/^[A-Z\s]+[A-Z]+$/.test(part) && part.split(' ').length > 1) {
+        // Skip parts that look like product names (various patterns)
+        const isProductName = (
+          // All uppercase with multiple words
+          (/^[A-Z\s]+[A-Z]+$/.test(part) && part.split(' ').length > 1) ||
+          // Contains common product keywords
+          /\b(WOMEN|HOMME|FEMME|CAT|LUNETTE|ENSEMBLE|MONTRE|PARFUM|COLLECTION|MATLERXS|originale)\b/i.test(part) ||
+          // Long uppercase sequences
+          /[A-Z]{8,}/.test(part) ||
+          // Title case product patterns
+          /^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+/.test(part) ||
+          // Product codes with numbers
+          /[A-Z]{3,}.*\d{3,}/.test(part) ||
+          // Contains "originale" keyword
+          /originale/i.test(part)
+        );
+        
+        if (isProductName) {
           console.log(`📝 Skipping product name pattern: "${part}"`);
           continue;
         }

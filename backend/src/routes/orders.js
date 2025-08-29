@@ -354,6 +354,7 @@ router.get('/', authenticateToken, async (req, res) => {
       assigned_to, 
       customer_name, 
       order_number,
+      customer_phone,
       start_date,
       end_date,
       created_before,
@@ -387,6 +388,15 @@ router.get('/', authenticateToken, async (req, res) => {
     if (order_number) {
       whereClause += ' AND o.order_number LIKE ?';
       queryParams.push(`%${order_number}%`);
+    }
+
+    // Phone filter: allow searching by phone (normalize basic separators)
+    if (customer_phone) {
+      // Basic normalization: strip non-digits for comparison pattern as well
+      const digitsOnly = customer_phone.toString().replace(/\D/g, '');
+      // Match either raw like or compacted like
+      whereClause += ' AND (o.customer_phone LIKE ? OR REPLACE(REPLACE(REPLACE(REPLACE(o.customer_phone, " ", ""), "-", ""), ".", ""), "+", "") LIKE ?)' ;
+      queryParams.push(`%${customer_phone}%`, `%${digitsOnly}%`);
     }
 
     if (start_date) {
@@ -548,8 +558,12 @@ router.post('/', authenticateToken, validateRequest(schemas.createOrder), logOrd
       notes,
       wilaya_id,
       delivery_type = 'home',
-      product_weight = 1.0
+      product_weight = 1.0,
+      quantity = 1,
+      quantity_ordered = 1
     } = req.body;
+
+    console.log('📦 [CREATE] Extracted quantity from request body:', { quantity, quantity_ordered });
 
     // Calculate delivery price if wilaya_id is provided
     let delivery_price = 0;
@@ -572,9 +586,12 @@ router.post('/', authenticateToken, validateRequest(schemas.createOrder), logOrd
 
     // Handle product_details - ensure it's properly formatted for JSON storage
     let productDetailsJson;
+    // quantity is already extracted from req.body destructuring above
+    
     if (typeof product_details === 'string') {
       try {
         productDetailsJson = JSON.parse(product_details);
+        quantity = parseInt(productDetailsJson.quantity) || 1; // Extract quantity
       } catch (e) {
         productDetailsJson = { description: product_details };
       }
@@ -582,20 +599,23 @@ router.post('/', authenticateToken, validateRequest(schemas.createOrder), logOrd
       productDetailsJson = { items: product_details };
     } else if (typeof product_details === 'object' && product_details !== null) {
       productDetailsJson = product_details;
+      quantity = parseInt(productDetailsJson.quantity) || 1; // Extract quantity
     } else {
       productDetailsJson = { description: String(product_details) };
     }
+    
+    console.log('📦 Order creation - extracted quantity:', quantity, 'from product_details:', productDetailsJson);
 
     const [result] = await pool.query(`
       INSERT INTO orders (
         order_number, customer_name, customer_phone, customer_address,
         customer_city, product_details, total_amount, delivery_date, notes,
-        wilaya_id, delivery_type, delivery_price, product_weight
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        wilaya_id, delivery_type, delivery_price, product_weight, quantity, quantity_ordered
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       orderNumber, customer_name, customer_phone, customer_address,
       customer_city, JSON.stringify(productDetailsJson), total_amount,
-      delivery_date, notes, wilaya_id || null, delivery_type, delivery_price, product_weight
+      delivery_date, notes, wilaya_id || null, delivery_type, delivery_price, product_weight, quantity, quantity_ordered
     ]);
 
     // Log the creation
@@ -725,7 +745,8 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
       'product_details', 'total_amount', 'status', 'payment_status', 'assigned_to',
       'confirmed_by', 'delivery_date', 'notes', 'ecotrack_tracking_id',
       'ecotrack_status', 'ecotrack_last_update', 'wilaya_id', 'baladia_id', 'delivery_type',
-      'delivery_price', 'product_weight', 'pricing_level', 'ecotrack_station_code'
+      'delivery_price', 'product_weight', 'pricing_level', 'ecotrack_station_code',
+      'quantity', 'quantity_ordered', 'final_total' // Add quantity fields and final_total
     ];
 
     Object.keys(updates).forEach(key => {
@@ -813,6 +834,8 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
               ? JSON.parse(order.product_details) 
               : order.product_details;
             console.log(`📦 Parsed product info:`, productInfo);
+            console.log(`📊 Extracted quantity from product_details:`, productInfo.quantity);
+            console.log(`📊 Order quantity from database:`, order.quantity);
           } catch (e) {
             console.log(`⚠️ Failed to parse product_details, using fallback:`, e.message);
             productInfo = { name: order.product_details };
@@ -837,7 +860,9 @@ router.put('/:id', authenticateToken, logOrderActivity('update'), async (req, re
           wilaya_id: order.wilaya_id,
           baladia_name: order.baladia_name,
           weight: order.weight || 1,
-          station_code: order.ecotrack_station_code // Add station code from frontend
+          station_code: order.ecotrack_station_code, // Add station code from frontend
+          quantity: order.quantity || productInfo.quantity || 1, // Use database quantity first, then product_details
+          quantity_ordered: order.quantity || productInfo.quantity || 1 // Also add as quantity_ordered for backward compatibility
         };
         
         console.log(`📦 BEFORE ECOTRACK CALL: Shipment data:`, shipmentData);
@@ -1935,6 +1960,8 @@ router.post('/batch-ecotrack', authenticateToken, requirePermission('canEditOrde
             wilaya_id: order.wilaya_id,
             baladia_name: order.baladia_name,
             weight: order.weight || 1,
+            quantity: order.quantity || productInfo.quantity || 1, // Use database quantity first
+            quantity_ordered: order.quantity || productInfo.quantity || 1, // Also add as quantity_ordered for backward compatibility
             station_code: order.ecotrack_station_code // Add station code from order
           };
 

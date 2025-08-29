@@ -557,8 +557,8 @@ class EcotrackService {
         }
       }
       
-      // Validate and fix commune name for Ecotrack using comprehensive mapping
-      finalCommune = this.validateAndFixCommune(finalCommune, finalWilayaId);
+      // Validate and fix commune name for Ecotrack using EcoTrack API + comprehensive mapping
+      finalCommune = await this.validateCommuneWithAPI(finalCommune, finalWilayaId);
       
       console.log(`  - Final wilaya_id: ${finalWilayaId}`);
       console.log(`  - Final commune: "${finalCommune}"`);
@@ -612,11 +612,27 @@ class EcotrackService {
         client: orderData.customer_name || 'Customer', // Required | max:255
         phone: (orderData.customer_phone?.replace(/\D/g, '') || '0555123456').substring(0, 10), // Required | digits between 9,10
         phone_2: orderData.customer_phone_2 ? orderData.customer_phone_2.replace(/\D/g, '').substring(0, 10) : undefined, // Optional | digits between 9,10
-        adresse: orderData.customer_address || orderData.customer_city || 'Address', // Required | max:255 - Use address or city as fallback
+        adresse: orderData.customer_address || (() => {
+          const city = orderData.customer_city || 'Ville';
+          const commune = finalCommune || 'Commune';
+          // Avoid redundancy if city and commune are the same
+          return city.toLowerCase() === commune.toLowerCase() ? city : `${city}, ${commune}`;
+        })() || 'Adresse non spécifiée', // Required | max:255 - Use address or construct from city+commune
         wilaya_id: finalWilayaId, // Required | integer between 1,48
         commune: finalCommune, // Required | max:255
         montant: finalMontant, // Required | numeric - Use frontend Total Final or backend calculation
-        remarque: this.buildRemarqueWithConfirmer(orderData.notes, orderData.confirmed_by_name, productDetails, orderData.quantity) || '', // max:255
+        remarque: (() => {
+          const quantityValue = orderData.quantity_ordered || orderData.quantity;
+          console.log('🔍 QUANTITY DEBUG:');
+          console.log('  - orderData.quantity_ordered:', orderData.quantity_ordered);
+          console.log('  - orderData.quantity:', orderData.quantity);
+          console.log('  - Final quantity used for remarque:', quantityValue);
+          console.log('  - Product details:', productDetails ? productDetails.name : 'No product details');
+          
+          const result = this.buildRemarqueWithConfirmer(orderData.notes, orderData.confirmed_by_name, productDetails, quantityValue);
+          console.log('📝 Final remarque result:', result);
+          return result || '';
+        })(), // max:255
         produit: productDetails.name || 'Product', // Required
         type_id: typeId, // Required | integer between 1,3 (1: Livraison, 2: Échange, 3: Pick up) - determined by delivery_type
         poids: Math.max(1, Math.floor(orderData.weight || productDetails.weight || 1)), // Required | integer (minimum 1)
@@ -650,6 +666,8 @@ class EcotrackService {
       const maxAttempts = 4;
       // Use actual communes from Tamanrasset wilaya based on database
       const alternativeCommunes = ['In Salah', 'Tamanrasset', 'In Guezzam', 'Tin Zaouatine'];
+      // Alternative communes for Alger wilaya (16) - known working ones
+      const algerAlternatives = ['Alger', 'Alger Centre', 'Bab El Oued', 'El Harrach'];
       
       // Try multiple commune name formats for problematic locations
       while (attemptCount < maxAttempts) {
@@ -659,6 +677,12 @@ class EcotrackService {
         if (attemptCount > 1 && finalWilayaId === 11) {
           ecotrackOrderData.commune = alternativeCommunes[attemptCount - 1] || ecotrackOrderData.commune;
           console.log(`🔄 Attempt ${attemptCount}: Trying commune name: ${ecotrackOrderData.commune}`);
+        }
+        
+        // For Alger wilaya, try alternative commune names
+        if (attemptCount > 1 && finalWilayaId === 16) {
+          ecotrackOrderData.commune = algerAlternatives[attemptCount - 1] || 'Alger';
+          console.log(`🔄 Attempt ${attemptCount}: Trying Alger commune: ${ecotrackOrderData.commune}`);
         }
         
         try {
@@ -678,12 +702,39 @@ class EcotrackService {
           console.log(`❌ Attempt ${attemptCount} failed:`, error.response?.data);
           
           // If it's a commune validation error and we have more attempts, continue
-          if (error.response?.status === 422 && 
-              error.response?.data?.errors?.commune && 
-              attemptCount < maxAttempts &&
-              finalWilayaId === 11) {
-            console.log(`🔄 Commune validation failed, trying alternative name...`);
-            continue;
+          if (error.response?.status === 422 && attemptCount < maxAttempts) {
+            // Check if it's a commune error or general validation error
+            if (error.response?.data?.errors?.commune || 
+                (error.response?.data?.message && error.response.data.message.toLowerCase().includes('commune'))) {
+              console.log(`🔄 Commune validation failed, trying alternative name...`);
+              
+              // Try fallback for specific wilayas
+              if (finalWilayaId === 11) {
+                continue; // Tamanrasset alternatives
+              } else if (finalWilayaId === 16) {
+                continue; // Alger alternatives
+              } else {
+                // For other wilayas, try using the wilaya name as commune
+                const wilayaNames = {
+                  1: 'Adrar', 2: 'Chlef', 3: 'Laghouat', 4: 'Oum El Bouaghi', 5: 'Batna',
+                  6: 'Béjaïa', 7: 'Biskra', 8: 'Béchar', 9: 'Blida', 10: 'Bouira',
+                  11: 'Tamanrasset', 12: 'Tébessa', 13: 'Tlemcen', 14: 'Tiaret', 15: 'Tizi Ouzou',
+                  16: 'Alger', 17: 'Djelfa', 18: 'Jijel', 19: 'Sétif', 20: 'Saïda',
+                  21: 'Skikda', 22: 'Sidi Bel Abbès', 23: 'Annaba', 24: 'Guelma', 25: 'Constantine',
+                  26: 'Médéa', 27: 'Mostaganem', 28: 'MSila', 29: 'Mascara', 30: 'Ouargla',
+                  31: 'Oran', 32: 'El Bayadh', 33: 'Illizi', 34: 'Bordj Bou Arreridj', 35: 'Boumerdès',
+                  36: 'El Tarf', 37: 'Tindouf', 38: 'Tissemsilt', 39: 'El Oued', 40: 'Khenchela',
+                  41: 'Souk Ahras', 42: 'Tipaza', 43: 'Mila', 44: 'Aïn Defla', 45: 'Naama',
+                  46: 'Aïn Témouchent', 47: 'Ghardaïa', 48: 'Relizane'
+                };
+                
+                if (wilayaNames[finalWilayaId]) {
+                  ecotrackOrderData.commune = wilayaNames[finalWilayaId];
+                  console.log(`🔄 Trying wilaya name as commune: ${ecotrackOrderData.commune}`);
+                  continue;
+                }
+              }
+            }
           }
           
           // If it's not a commune error or we're out of attempts, throw the error
@@ -1085,6 +1136,7 @@ class EcotrackService {
    * @returns {string} - Combined remarque with confirmer, notes, variant, quantity and colis ouvrable
    */
   buildRemarqueWithConfirmer(notes = '', confirmerName = '', productDetails = null, quantity = null) {
+    
     let remarque = '';
     const addedParts = new Set(); // Track added parts to prevent duplicates
     
@@ -1093,6 +1145,9 @@ class EcotrackService {
       const quantityPart = `Quantité: ${quantity}`;
       remarque += quantityPart;
       addedParts.add(quantityPart.toLowerCase());
+      console.log('  ✓ Added quantity to remarque:', quantityPart);
+    } else {
+      console.log('  ⚠️ Quantity not added - value:', quantity, 'condition check:', !!(quantity && quantity > 0));
     }
     
     // Add "colis ouvrable" information
@@ -1114,16 +1169,20 @@ class EcotrackService {
     }
     
     // Add product variant information if available
+    let extractedVariant = 'none';
     if (productDetails) {
       let variant = '';
       
       // Try to extract variant from different possible fields
       if (productDetails.variant) {
         variant = productDetails.variant;
+        extractedVariant = `direct.variant: ${variant}`;
       } else if (productDetails.variante) {
         variant = productDetails.variante;
+        extractedVariant = `direct.variante: ${variant}`;
       } else if (productDetails.product_variant) {
         variant = productDetails.product_variant;
+        extractedVariant = `direct.product_variant: ${variant}`;
       } else if (productDetails.size || productDetails.color || productDetails.model) {
         // Build variant from individual attributes
         const variantParts = [];
@@ -1131,6 +1190,35 @@ class EcotrackService {
         if (productDetails.color) variantParts.push(productDetails.color);
         if (productDetails.model) variantParts.push(productDetails.model);
         variant = variantParts.join(' ');
+        extractedVariant = `attributes: ${variant}`;
+      } else if (productDetails.name) {
+        // Try to extract variant from product name patterns
+        const productName = productDetails.name.trim();
+        
+        // Look for patterns like "PRODUCT NAME 1234" or "PRODUCT CODE variant"
+        const variantPatterns = [
+          /\b(\d{3,5})\b/g, // 3-5 digit codes like "2517"
+          /\b(XS|S|M|L|XL|XXL)\b/gi, // Size patterns
+          /\b(originale?|original|authentique?|authentic)\b/gi, // Authenticity markers
+          /\b(noir|blanc|rouge|bleu|vert|jaune|rose|black|white|red|blue|green|yellow|pink)\b/gi, // Colors
+          /\b(taille\s+\w+|size\s+\w+)\b/gi, // Size with prefix
+          /\b(mod[eè]le?\s+\w+|model\s+\w+)\b/gi // Model with prefix
+        ];
+        
+        const extractedVariants = [];
+        
+        for (const pattern of variantPatterns) {
+          const matches = productName.match(pattern);
+          if (matches) {
+            extractedVariants.push(...matches);
+          }
+        }
+        
+        if (extractedVariants.length > 0) {
+          variant = extractedVariants.join(' ');
+          extractedVariant = `name_pattern: ${variant}`;
+          console.log(`  🔍 Extracted variant from product name: "${variant}"`);
+        }
       }
       
       if (variant && variant.trim()) {
@@ -1141,7 +1229,10 @@ class EcotrackService {
           }
           remarque += variantPart;
           addedParts.add(variantPart.toLowerCase());
+          console.log(`  ✓ Added variant to remarque: ${variantPart}`);
         }
+      } else {
+        console.log(`  ⚠️ No variant information found in productDetails`);
       }
     }
     
@@ -1156,6 +1247,17 @@ class EcotrackService {
       // Remove common product patterns like "PRODUCT NAME", product codes, etc.
       cleanNotes = cleanNotes.replace(/^[A-Z\s]+[A-Z]+$/g, '').trim(); // Remove all-caps product names
       cleanNotes = cleanNotes.replace(/\b[A-Z]{2,}\s+[A-Z]{2,}[A-Z\s]*\b/g, '').trim(); // Remove patterns like "WOMEN CAT LUNETTE"
+      cleanNotes = cleanNotes.replace(/\b[A-Z]+\s+[A-Z]+\s+[A-Z]+\b/g, '').trim(); // Remove 3+ word uppercase patterns
+      cleanNotes = cleanNotes.replace(/^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+.*$/g, '').trim(); // Remove title case product names
+      
+      // Remove specific product name patterns that might slip through
+      cleanNotes = cleanNotes.replace(/.*WOMEN.*CAT.*LUNETTE.*/gi, '').trim();
+      cleanNotes = cleanNotes.replace(/.*ENSEMBLE.*FEMME.*/gi, '').trim();
+      cleanNotes = cleanNotes.replace(/.*MONTRE.*FEMME.*/gi, '').trim();
+      cleanNotes = cleanNotes.replace(/.*PARFUM.*HOMME.*/gi, '').trim();
+      cleanNotes = cleanNotes.replace(/.*MATLERXS.*/gi, '').trim();
+      cleanNotes = cleanNotes.replace(/.*[A-Z]{3,}.*\d{3,}.*/gi, '').trim(); // Remove patterns like MATLERXS 2517
+      cleanNotes = cleanNotes.replace(/.*originale.*/gi, '').trim();
       
       // Split notes by common separators and process each part
       const noteParts = cleanNotes.split(/[|,;]/).map(part => part.trim()).filter(part => part.length > 0);
@@ -1164,8 +1266,23 @@ class EcotrackService {
         // Skip empty parts or very short meaningless parts
         if (notePart.length < 2) continue;
         
-        // Skip parts that look like product names (all uppercase, multiple words)
-        if (/^[A-Z\s]+[A-Z]+$/.test(notePart) && notePart.split(' ').length > 1) {
+        // Skip parts that look like product names (various patterns)
+        const isProductName = (
+          // All uppercase with multiple words
+          (/^[A-Z\s]+[A-Z]+$/.test(notePart) && notePart.split(' ').length > 1) ||
+          // Contains common product keywords
+          /\b(WOMEN|HOMME|FEMME|CAT|LUNETTE|ENSEMBLE|MONTRE|PARFUM|COLLECTION|MATLERXS|originale)\b/i.test(notePart) ||
+          // Long uppercase sequences
+          /[A-Z]{8,}/.test(notePart) ||
+          // Title case product patterns
+          /^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+/.test(notePart) ||
+          // Product codes with numbers
+          /[A-Z]{3,}.*\d{3,}/.test(notePart) ||
+          // Contains "originale" keyword
+          /originale/i.test(notePart)
+        );
+        
+        if (isProductName) {
           console.log(`📝 Skipping product name pattern: "${notePart}"`);
           continue;
         }
@@ -1185,7 +1302,7 @@ class EcotrackService {
           if (remarque) {
             remarque += ' | ';
           }
-          remarque += notePart;
+          // remarque += notePart;
           addedParts.add(notePartLower);
         }
       }
@@ -1202,8 +1319,8 @@ class EcotrackService {
       remarque = remarque.substring(0, 252) + '...';
     }
     
-    console.log(`📝 Built clean remarque: "${remarque}" (from confirmer: "${confirmerName}", variant: "${productDetails?.variant || 'none'}", notes: "${notes}")`);
-    console.log(`📝 Removed duplicates and cleaned: original length ${(confirmerName + (productDetails?.variant || '') + notes).length} -> final length ${remarque.length}`);
+    console.log(`📝 Built clean remarque: "${remarque}" (from confirmer: "${confirmerName}", variant: "${extractedVariant}", notes: "${notes}")`);
+    console.log(`📝 Removed duplicates and cleaned: original length ${(confirmerName + extractedVariant + notes).length} -> final length ${remarque.length}`);
     return remarque;
   }
 
@@ -1276,13 +1393,28 @@ class EcotrackService {
       return totalAmount;
     }
     
-    // Method 3: total_amount + delivery_price (assuming total_amount already includes quantity)
+    // Method 3: total_amount + delivery_price (but consider quantity if available)
     const productAmount = parseFloat(orderData.total_amount) || 0;
     const deliveryAmount = parseFloat(orderData.delivery_price) || 0;
     
     if (productAmount > 0) {
-      totalAmount = productAmount + deliveryAmount;
-      console.log(`✅ Using total_amount + delivery method: ${productAmount} + ${deliveryAmount} = ${totalAmount}`);
+      // Check if we have quantity information to multiply
+      let quantity = 1;
+      
+      // Try to get quantity from multiple sources
+      if (orderData.quantity && orderData.quantity > 0) {
+        quantity = parseFloat(orderData.quantity);
+      } else if (orderData.quantity_ordered && orderData.quantity_ordered > 0) {
+        quantity = parseFloat(orderData.quantity_ordered);
+      } else if (productDetails && productDetails.quantity && productDetails.quantity > 0) {
+        quantity = parseFloat(productDetails.quantity);
+      }
+      
+      // Calculate total considering quantity
+      const productTotal = productAmount * quantity;
+      totalAmount = productTotal + deliveryAmount;
+      
+      console.log(`✅ Using total_amount × quantity + delivery method: ${productAmount} × ${quantity} + ${deliveryAmount} = ${totalAmount}`);
       return totalAmount;
     }
     
@@ -1503,6 +1635,209 @@ class EcotrackService {
    * @param {number} wilayaId - Wilaya ID for context
    * @returns {string} - Valid commune name
    */
+  // Fetch valid communes from EcoTrack API
+  async fetchValidCommunes() {
+    try {
+      let apiToken = this.apiToken;
+      let userGuid = this.userGuid;
+      
+      // Try to get credentials from default account if global config not available
+      if (!apiToken || !userGuid) {
+        const defaultAccount = await this.getDefaultAccount();
+        if (defaultAccount) {
+          apiToken = defaultAccount.api_token;
+          userGuid = defaultAccount.user_guid;
+        }
+      }
+      
+      if (!apiToken || !userGuid) {
+        console.log('⚠️ No EcoTrack credentials available for fetching communes');
+        return null;
+      }
+      
+      // Try different possible commune endpoints
+      const possibleEndpoints = [
+        'https://app.noest-dz.com/api/public/communes',
+        'https://app.noest-dz.com/api/public/cities',
+        'https://app.noest-dz.com/api/public/locations'
+      ];
+      
+      for (const endpoint of possibleEndpoints) {
+        try {
+          console.log(`🔍 Trying to fetch communes from: ${endpoint}`);
+          const response = await axios.get(endpoint, {
+            params: {
+              api_token: apiToken,
+              user_guid: userGuid
+            },
+            headers: {
+              'Accept': 'application/json',
+            },
+            timeout: 10000
+          });
+          
+          if (response.data) {
+            console.log(`✅ Successfully fetched communes from: ${endpoint}`);
+            console.log('📊 Sample commune data:', JSON.stringify(response.data).substring(0, 500) + '...');
+            return response.data;
+          }
+        } catch (error) {
+          console.log(`❌ Failed to fetch from ${endpoint}:`, error.response?.status || error.message);
+          continue;
+        }
+      }
+      
+      console.log('⚠️ No commune endpoints found, using fallback logic');
+      return null;
+    } catch (error) {
+      console.error('❌ Error fetching communes from EcoTrack:', error.message);
+      return null;
+    }
+  }
+
+  // Enhanced commune validation using EcoTrack API data
+  async validateCommuneWithAPI(commune, wilayaId) {
+    try {
+      console.log(`🔍 Validating commune "${commune}" for wilaya ${wilayaId} with EcoTrack API...`);
+      
+      // Special handling for Alger province (wilaya_id 16)
+      if (wilayaId === 16 || wilayaId === '16') {
+        console.log(`🏛️ Alger wilaya detected, using known working communes...`);
+        
+        // List of known working Alger communes based on EcoTrack's database
+        const algerCommunes = [
+          'Alger Centre',
+          'Sidi M\'Hamed', 
+          'El Madania',
+          'Bab El Oued',
+          'Bologhine',
+          'Casbah',
+          'Oued Koriche',
+          'Bir Mourad Rais',
+          'El Biar',
+          'Bouzareah',
+          'Birkhadem',
+          'El Harrach',
+          'Baraki',
+          'Oued Smar',
+          'Bourouba',
+          'Hussein Dey',
+          'Kouba',
+          'Bachdjerrah',
+          'Dar El Beida',
+          'Bab Ezzouar',
+          'Ben Aknoun',
+          'Dely Ibrahim',
+          'Hammamet',
+          'Rais Hamidou',
+          'Djasr Kasentina',
+          'El Mouradia',
+          'Hydra',
+          'Mohammadia',
+          'Bordj El Kiffan',
+          'El Magharia',
+          'Beni Messous',
+          'Les Eucalyptus',
+          'Birtouta',
+          'Tessala El Merdja',
+          'Ouled Chebel',
+          'Sidi Moussa',
+          'Ain Taya',
+          'Bordj El Bahri',
+          'El Marsa',
+          'H Dey',
+          'Reghaïa',
+          'Rouiba',
+          'Staoueli',
+          'Zeralda',
+          'Ain Benian',
+          'Cheraga',
+          'Douera',
+          'Ouled Fayet',
+          'El Achour',
+          'Draria',
+          'Debbah'
+        ];
+        
+        // Try exact match first
+        let exactMatch = algerCommunes.find(c => 
+          c.toLowerCase() === commune.toLowerCase()
+        );
+        if (exactMatch) {
+          console.log(`✅ Found exact Alger commune: "${exactMatch}"`);
+          return exactMatch;
+        }
+        
+        // Try partial match
+        let partialMatch = algerCommunes.find(c =>
+          c.toLowerCase().includes(commune.toLowerCase()) ||
+          commune.toLowerCase().includes(c.toLowerCase())
+        );
+        if (partialMatch) {
+          console.log(`✅ Found partial Alger commune match: "${partialMatch}"`);
+          return partialMatch;
+        }
+        
+        // Special handling for Bab Ezzouar area - use Alger as fallback
+        if (commune.toLowerCase().includes('bab ezzouar') || 
+            commune.toLowerCase().includes('bab_ezzouar')) {
+          console.log(`🎯 Bab Ezzouar detected, using "Alger" as fallback due to API validation issues`);
+          return 'Alger'; // Use Alger instead of exact name due to EcoTrack validation issues
+        }
+        
+        // Default to Alger Centre for unknown Alger communes
+        console.log(`🏛️ Unknown Alger commune, defaulting to "Alger Centre"`);
+        return 'Alger Centre';
+      }
+      
+      // For other wilayas, try API fetch
+      const communesData = await this.fetchValidCommunes();
+      
+      if (communesData) {
+        // Try to find the commune in the API response
+        // The structure might be different, so we'll check various possible formats
+        let validCommunes = [];
+        
+        if (Array.isArray(communesData)) {
+          validCommunes = communesData;
+        } else if (communesData.data && Array.isArray(communesData.data)) {
+          validCommunes = communesData.data;
+        } else if (typeof communesData === 'object') {
+          // Extract communes from object structure
+          validCommunes = Object.values(communesData).flat();
+        }
+        
+        // Look for matching commune in the API data
+        const communeLower = commune.toLowerCase();
+        const match = validCommunes.find(item => {
+          if (typeof item === 'string') {
+            return item.toLowerCase() === communeLower;
+          } else if (item && typeof item === 'object') {
+            return (
+              (item.name && item.name.toLowerCase() === communeLower) ||
+              (item.commune && item.commune.toLowerCase() === communeLower) ||
+              (item.label && item.label.toLowerCase() === communeLower)
+            );
+          }
+          return false;
+        });
+        
+        if (match) {
+          const matchedName = typeof match === 'string' ? match : (match.name || match.commune || match.label);
+          console.log(`✅ Found valid commune in API: "${matchedName}"`);
+          return matchedName;
+        }
+      }
+      
+      // Fallback to existing logic if API doesn't work
+      return this.validateAndFixCommune(commune, wilayaId);
+    } catch (error) {
+      console.error('❌ Error in API commune validation:', error.message);
+      // Fallback to existing logic
+      return this.validateAndFixCommune(commune, wilayaId);
+    }
+  }
+
   validateAndFixCommune(commune, wilayaId) {
     if (!commune || typeof commune !== 'string') {
       return this.getDefaultCommuneForWilaya(wilayaId);
@@ -1521,6 +1856,11 @@ class EcotrackService {
       'Rouiba': 'Rouiba',
       'Reghaia': 'Reghaia',
       'Dar El Beida': 'Dar El Beida',
+      // Bab Ezzouar area alternatives - use simple wilaya name
+      'Bab Ezzouar': 'Alger',
+      'Bab ezzouar': 'Alger',
+      'BAB EZZOUAR': 'Alger',
+      'bab ezzouar': 'Alger',
       // Staoueli area alternatives (common misspelling)
       'Setaouali': 'Staoueli',
       'setaouali': 'Staoueli',
@@ -1535,6 +1875,28 @@ class EcotrackService {
     if (communeMapping[commune]) {
       console.log(`🔄 Mapped commune "${originalCommune}" to "${communeMapping[commune]}"`);
       return communeMapping[commune];
+    }
+    
+    // Special handling for Alger wilaya (16) - use known working communes
+    if (wilayaId === 16) {
+      const algerCommunes = [
+        'Alger Centre', 'Bab El Oued', 'El Harrach', 'Bir Mourad Rais', 
+        'Rouiba', 'Reghaia', 'Dar El Beida', 'Baraki', 'Sidi Moussa'
+      ];
+      
+      // If the commune contains common Alger area keywords, try to map it
+      const lowerCommune = commune.toLowerCase();
+      if (lowerCommune.includes('bab') && lowerCommune.includes('ez')) {
+        console.log(`🏛️ Bab Ezzouar area detected, using Alger as fallback`);
+        return 'Alger';
+      }
+      
+      // Try some alternative basic commune names that might work
+      const alternativeCommunes = ['Alger', 'Bab el Oued', 'El Harrach', 'Rouiba', 'Alger Centre', 'Kouba'];
+      for (const altCommune of alternativeCommunes) {
+        console.log(`🔄 Trying alternative commune: "${altCommune}" for wilaya 16`);
+        return altCommune;
+      }
     }
     
     // Case-insensitive mapping
@@ -1580,7 +1942,7 @@ class EcotrackService {
       13: 'Tlemcen',
       14: 'Tiaret',
       15: 'Tizi Ouzou',
-      16: 'Alger Centre', // Alger
+      16: 'Alger', // Alger
       17: 'Djelfa',
       18: 'Jijel',
       19: 'Setif',
