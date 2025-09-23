@@ -21,8 +21,126 @@ const STATUS_OPTIONS = [
 	'cancelled',
 	'returned',
 	'on_hold',
+	// New status options
+	'wrong_number',
+	'follow_later',
+	'non_available',
+	'order_later',
+	// Tentative call statuses (as in original): 1 to 6
+	'1_tent',
+	'2_tent',
+	'3_tent',
+	'4_tent',
+	'5_tent',
+	'6_tent',
 	'import_to_delivery_company',
 ]
+
+// Helper to check if order is older than 7 days
+function isOrderOlderThan7Days(createdAt) {
+	if (!createdAt) return false
+	const orderDate = new Date(createdAt)
+	const currentDate = new Date()
+	const diffTime = Math.abs(currentDate - orderDate)
+	const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+	return diffDays > 7
+}
+
+// Helper to check if order is delayed (over 7 days)
+function isOrderDelayed(createdAt) {
+	if (!createdAt) return false
+	const orderDate = new Date(createdAt)
+	const currentDate = new Date()
+	const diffTime = Math.abs(currentDate - orderDate)
+	const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+	return diffDays > 7
+}
+
+// Helper to get status colors
+function getStatusColor(status) {
+	const colorMap = {
+		pending: '#ffa940', // Orange
+		confirmed: '#52c41a', // Green
+		processing: '#1890ff', // Blue
+		out_for_delivery: '#722ed1', // Purple
+		delivered: '#389e0d', // Dark Green
+		cancelled: '#ff4d4f', // Red
+		returned: '#d46b08', // Dark Orange
+		on_hold: '#faad14', // Gold
+		// New status options
+		wrong_number: '#ff7875', // Light Red
+		follow_later: '#40a9ff', // Light Blue
+		non_available: '#ff9c6e', // Light Orange
+		order_later: '#73d13d', // Light Green
+		'1_tent': '#b7eb8f',
+		'2_tent': '#95de64',
+		'3_tent': '#73d13d',
+		'4_tent': '#52c41a',
+		'5_tent': '#389e0d',
+		'6_tent': '#237804',
+		import_to_delivery_company: '#722ed1' // Purple
+	}
+	return colorMap[status] || '#000000'
+}
+
+// Helper to translate status values
+function getStatusLabel(status, t) {
+	const statusMap = {
+		pending: t('orders.statuses.pending') || 'En Attente',
+		confirmed: t('orders.statuses.confirmed') || 'Confirmé',
+		processing: t('orders.statuses.processing') || 'En Traitement',
+		out_for_delivery: t('orders.statuses.out_for_delivery') || 'En Livraison',
+		delivered: t('orders.statuses.delivered') || 'Livré',
+		cancelled: t('orders.statuses.cancelled') || 'Annulé',
+		returned: t('orders.statuses.returned') || 'Retourné',
+		on_hold: t('orders.statuses.on_hold') || 'En Attente',
+		// New status options
+		wrong_number: t('orders.statuses.wrong_number') || 'Mauvais Numéro',
+		follow_later: t('orders.statuses.follow_later') || 'Suivre Plus Tard',
+		non_available: t('orders.statuses.non_available') || 'Non Disponible',
+		order_later: t('orders.statuses.order_later') || 'Commander Plus Tard',
+		'1_tent': t('orders.statuses.1_tent') || '1 Tente',
+		'2_tent': t('orders.statuses.2_tent') || '2 Tentes',
+		'3_tent': t('orders.statuses.3_tent') || '3 Tentes',
+		'4_tent': t('orders.statuses.4_tent') || '4 Tentes',
+		'5_tent': t('orders.statuses.5_tent') || '5 Tentes',
+		'6_tent': t('orders.statuses.6_tent') || '6 Tentes',
+		import_to_delivery_company: t('orders.statuses.import_to_delivery_company') || 'Envoyé au Transporteur'
+	}
+	return statusMap[status] || status
+}
+
+// Helpers for boutique filtering and debugging
+function extractProductNameFromDetails(pd) {
+	if (!pd || typeof pd !== 'object') return null
+	const name = (
+		pd.name ||
+		pd.product_name ||
+		pd.productName ||
+		(pd.product && pd.product.name) ||
+		(pd.Product && pd.Product.name) ||
+		pd.title ||
+		pd.productTitle ||
+		null
+	)
+	return name != null ? String(name) : null
+}
+
+function extractOrderProductName(order) {
+	try {
+		const pd = typeof order?.product_details === 'string'
+			? JSON.parse(order.product_details)
+			: order?.product_details
+		return extractProductNameFromDetails(pd)
+	} catch (_) {
+		return null
+	}
+}
+
+function normalizeName(name) {
+	if (!name) return ''
+	return String(name).toLowerCase().trim().replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, ' ')
+}
 
 function Select({ value, onChange, children, disabled, className, style }) {
 	return (
@@ -58,6 +176,14 @@ function Button({ children, onClick, type = 'button', className, disabled }) {
 			{children}
 		</button>
 	)
+}
+
+// Ensure the URL has http/https scheme before opening
+function ensureHttp(url) {
+	if (!url || typeof url !== 'string') return ''
+	const trimmed = url.trim()
+	if (/^https?:\/\//i.test(trimmed)) return trimmed
+	return 'https://' + trimmed
 }
 
 function Pagination({ page, pages, onPageChange }) {
@@ -105,6 +231,8 @@ const OrderRow = React.memo(function OrderRow({
 	selected,
 	onToggleSelect,
 	t,
+	assigningIds,
+	statusUpdatingIds,
 }) {
 	return (
 		<tr>
@@ -121,10 +249,25 @@ const OrderRow = React.memo(function OrderRow({
 			<td>{order.customer_city}</td>
 			<td className="truncate" title={order.customer_address || ''}>{order.customer_address}</td>
 			<td>
-				<Select value={order.status} onChange={(val) => onStatusChange(order.id, val)}>
-					{STATUS_OPTIONS.map((s) => (
-						<option key={s} value={s}>{s}</option>
-					))}
+				<Select 
+					value={order.status} 
+					onChange={(val) => onStatusChange(order.id, val)}
+					disabled={statusUpdatingIds.has(order.id)}
+					style={{
+						color: getStatusColor(order.status),
+						fontWeight: 'bold',
+						border: `2px solid ${getStatusColor(order.status)}`,
+						borderRadius: '4px',
+						padding: '2px 4px'
+					}}
+				>
+					{statusUpdatingIds.has(order.id) ? (
+						<option value={order.status}>{t?.('common.loading') || 'Loading...'}</option>
+					) : (
+						STATUS_OPTIONS.map((s) => (
+							<option key={s} value={s} style={{ color: getStatusColor(s) }}>{getStatusLabel(s, t)}</option>
+						))
+					)}
 				</Select>
 			</td>
 			<td>{order.total_amount || 0} DA</td>
@@ -133,17 +276,30 @@ const OrderRow = React.memo(function OrderRow({
 					<Select
 							value={order.assigned_to ?? ''}
 						onChange={(val) => onAssign(order.id, val || null)}
+						disabled={assigningIds.has(order.id)}
 					>
-							<option value="">{t?.('orders.unassigned') || 'Unassigned'}</option>
-						{users.map((u) => (
-							<option key={u.id} value={u.id}>
-								{u.first_name || ''} {u.last_name || ''} ({u.username})
-							</option>
-						))}
+						{assigningIds.has(order.id) ? (
+							<option value={order.assigned_to ?? ''}>{t?.('common.loading') || 'Loading...'}</option>
+						) : (
+							<>
+								<option value="">{t?.('orders.unassigned') || 'Unassigned'}</option>
+								{users.map((u) => (
+									<option key={u.id} value={u.id}>
+										{u.first_name || ''} {u.last_name || ''} ({u.username})
+									</option>
+								))}
+							</>
+						)}
 					</Select>
 				</td>
 			)}
-			<td>{new Date(order.created_at).toLocaleDateString()}</td>
+			<td style={{ 
+				color: isOrderOlderThan7Days(order.created_at) ? '#ff6b6b' : 'inherit',
+				fontWeight: isOrderOlderThan7Days(order.created_at) ? 'bold' : 'normal'
+			}} title={isOrderOlderThan7Days(order.created_at) ? 'Order is older than 7 days' : ''}>
+				{new Date(order.created_at).toLocaleString()}
+				{isOrderOlderThan7Days(order.created_at) && ' ⚠️'}
+			</td>
 			<td className="truncate" title={order.notes || ''}>{order.notes}</td>
 			<td>
 				<Button onClick={() => onEdit?.(order)}>{t?.('common.edit') || 'Edit'}</Button>
@@ -161,6 +317,7 @@ export default function OrderManagmentHTML() {
 	const isSupervisor = user?.role === 'supervisor' || isAdmin
 	const canAssignOrders = isAdmin || isSupervisor
 	const canDeleteOrders = isAdmin
+	const canDistributeOrders = isAdmin
 
 	// Data
 	const [orders, setOrders] = useState([])
@@ -175,6 +332,12 @@ export default function OrderManagmentHTML() {
 	const [loading, setLoading] = useState(false)
 	const [usersLoading, setUsersLoading] = useState(false)
 	const [error, setError] = useState(null)
+	const [distributionLoading, setDistributionLoading] = useState(false)
+
+	// Loading states for individual actions
+	const [assigningIds, setAssigningIds] = useState(new Set())
+	const [statusUpdatingIds, setStatusUpdatingIds] = useState(new Set())
+	const [bulkActionLoading, setBulkActionLoading] = useState(false)
 
 	// Selection state for table rows
 	const [selectedIds, setSelectedIds] = useState(new Set())
@@ -189,8 +352,19 @@ export default function OrderManagmentHTML() {
 
 	const [statusFilter, setStatusFilter] = useState('')
 	const [assignedFilter, setAssignedFilter] = useState('') // '', 'null', 'not_null', or userId
+	const [boutiqueFilter, setBoutiqueFilter] = useState('') // '' or location id as string
 	const [searchText, setSearchText] = useState('')
 	const [debouncedSearch, setDebouncedSearch] = useState('')
+
+	// Debug: boutique filtering diagnostics
+	const [debugBoutique, setDebugBoutique] = useState(false)
+
+	// Tab state
+	const [activeTab, setActiveTab] = useState('orders')
+
+	// Boutiques (locations)
+	const [locations, setLocations] = useState([])
+	const [loadingLocations, setLoadingLocations] = useState(false)
 
 		// Edit modal state
 		const [editOpen, setEditOpen] = useState(false)
@@ -208,18 +382,19 @@ export default function OrderManagmentHTML() {
 
 	// Load products once for matching
 	const fetchProducts = useCallback(async () => {
-		if (loadingProducts || products.length) return
+		if (loadingProducts) return // Only prevent if already loading
 		try {
 			setLoadingProducts(true)
 			const res = await stockService.getProducts({ limit: 1000 })
 			const list = res?.products || res?.data || []
+			console.log('📦 Products loaded:', list.length, 'products')
 			setProducts(Array.isArray(list) ? list : [])
 		} catch (e) {
 			console.warn('Failed to load products', e)
 		} finally {
 			setLoadingProducts(false)
 		}
-	}, [loadingProducts, products.length])
+	}, [loadingProducts])
 
 	const loadVariants = useCallback(async (productId) => {
 		if (!productId) { setVariants([]); return }
@@ -253,6 +428,23 @@ export default function OrderManagmentHTML() {
 		}
 	}, [canAssignOrders, usersLoading, users.length])
 
+	// Load boutiques (locations)
+	const fetchLocations = useCallback(async () => {
+		if (loadingLocations || locations.length) return
+		try {
+			setLoadingLocations(true)
+			// Use stockService to fetch locations (same as legacy implementation)
+			const data = await stockService.getLocations({ is_active: true })
+			const list = data?.locations || data?.data || data || []
+			setLocations(Array.isArray(list) ? list : [])
+		} catch (e) {
+			console.warn('Failed to load locations', e)
+			setLocations([])
+		} finally {
+			setLoadingLocations(false)
+		}
+	}, [loadingLocations, locations.length])
+
 			const buildQuery = useCallback(() => {
 			const params = { page, limit, sort_by: 'created_at', sort_order: 'DESC' }
 			if (statusFilter) params.status = statusFilter
@@ -275,26 +467,301 @@ export default function OrderManagmentHTML() {
 			return params
 		}, [page, limit, statusFilter, assignedFilter, debouncedSearch])
 
+	// Store all orders for client-side filtering
+	const [allOrders, setAllOrders] = useState([])
+
+	// Derived filtered orders using the same logic as the original version
+	const derivedFilteredOrders = useMemo(() => {
+		let filtered = Array.isArray(allOrders) ? [...allOrders] : []
+
+		// Apply search filter (phone/name/order number)
+		if (debouncedSearch && debouncedSearch.trim()) {
+			const searchTerm = debouncedSearch.trim().toLowerCase()
+			const onlyDigits = searchTerm.replace(/\D/g, '')
+			const hasAtLeast8Digits = onlyDigits.length >= 8
+			const looksOrderNumber = /^\s*[A-Za-z]*[-_]?[0-9]{3,}\s*$/.test(searchTerm)
+
+			filtered = filtered.filter(order => {
+				if (hasAtLeast8Digits && order.customer_phone && order.customer_phone.toLowerCase().includes(searchTerm)) {
+					return true
+				}
+				if (looksOrderNumber && order.order_number && order.order_number.toLowerCase().includes(searchTerm)) {
+					return true
+				}
+				if (order.customer_name && order.customer_name.toLowerCase().includes(searchTerm)) {
+					return true
+				}
+				return false
+			})
+		}
+
+		// Status filter
+		if (statusFilter) {
+			filtered = filtered.filter(order => order.status === statusFilter)
+		}
+
+		// Assigned filter
+		if (assignedFilter) {
+			if (assignedFilter === 'null') {
+				filtered = filtered.filter(order => !order.assigned_to)
+			} else if (assignedFilter === 'not_null') {
+				filtered = filtered.filter(order => !!order.assigned_to)
+			} else {
+				filtered = filtered.filter(order => String(order.assigned_to) === String(assignedFilter))
+			}
+		}
+
+		// Boutique filter (same logic as original) with more robust product name extraction
+		if (boutiqueFilter) {
+			const productsList = Array.isArray(products) ? products : []
+			const locationsList = Array.isArray(locations) ? locations : []
+
+			filtered = filtered.filter(order => {
+				// Parse product details consistently
+				let productName = extractOrderProductName(order)
+
+				if (!productName) {
+					// No product details available
+					return boutiqueFilter === 'no_match' ? true : boutiqueFilter === 'has_match' ? false : false
+				}
+
+				const orderProductName = String(productName).toLowerCase().trim()
+				const normalizedOrderName = normalizeName(orderProductName)
+				const normLen = normalizedOrderName.length
+
+				// Find matched product in our products list
+				let matchedProduct = null
+				for (const p of productsList) {
+					if (!p?.name) continue
+					const dbName = String(p.name).toLowerCase().trim()
+					const normalizedDbName = normalizeName(dbName)
+					const dbLen = normalizedDbName.length
+					// Guard against overly short fuzzy matches which cause random results
+					const exactMatch = (dbName === orderProductName) || (normalizedDbName === normalizedOrderName)
+					const allowFuzzy = normLen >= 4 && dbLen >= 4
+					const fuzzyMatch = allowFuzzy && (
+						dbName.includes(orderProductName) ||
+						orderProductName.includes(dbName) ||
+						normalizedDbName.includes(normalizedOrderName) ||
+						normalizedOrderName.includes(normalizedDbName)
+					)
+					if (exactMatch || fuzzyMatch) {
+						matchedProduct = p
+						break
+					}
+				}
+
+				if (!matchedProduct) {
+					// No DB product match found
+					return boutiqueFilter === 'no_match'
+				}
+
+				if (boutiqueFilter === 'has_match') return true
+				// Specific boutique (location id)
+				const locId = matchedProduct.location_id
+				if (!locId) return false
+				return String(locId) === String(boutiqueFilter)
+			})
+		}
+
+		// Tab filter - filter by delay status
+		if (activeTab === 'delayed') {
+			filtered = filtered.filter(order => isOrderDelayed(order.created_at))
+		} else if (activeTab === 'orders') {
+			filtered = filtered.filter(order => !isOrderDelayed(order.created_at))
+		}
+
+		return filtered
+	}, [allOrders, debouncedSearch, statusFilter, assignedFilter, boutiqueFilter, products, locations, activeTab])
+
+	// Calculate tab counts from all orders (regardless of current filters)
+	const tabCounts = useMemo(() => {
+		const all = Array.isArray(allOrders) ? allOrders : []
+		const regularOrders = all.filter(order => !isOrderDelayed(order.created_at))
+		const delayedOrders = all.filter(order => isOrderDelayed(order.created_at))
+		
+		return {
+			regular: regularOrders.length,
+			delayed: delayedOrders.length
+		}
+	}, [allOrders])
+
+	// Calculate statistics from filtered orders
+	const calculateStatistics = () => {
+		const stats = {
+			total: derivedFilteredOrders.length,
+			pending: 0,
+			confirmed: 0,
+			processing: 0,
+			out_for_delivery: 0,
+			delivered: 0,
+			cancelled: 0,
+			wrong_number: 0,
+			follow_later: 0,
+			non_available: 0,
+			order_later: 0,
+			totalAmount: 0,
+			averageAmount: 0,
+		}
+
+		derivedFilteredOrders.forEach(order => {
+			stats.totalAmount += parseFloat(order.total_amount || 0)
+			
+			switch(order.status) {
+				case 'pending':
+					stats.pending++
+					break
+				case 'confirmed':
+					stats.confirmed++
+					break
+				case 'processing':
+					stats.processing++
+					break
+				case 'out_for_delivery':
+					stats.out_for_delivery++
+					break
+				case 'delivered':
+					stats.delivered++
+					break
+				case 'cancelled':
+					stats.cancelled++
+					break
+				case 'wrong_number':
+					stats.wrong_number++
+					break
+				case 'follow_later':
+					stats.follow_later++
+					break
+				case 'non_available':
+					stats.non_available++
+					break
+				case 'order_later':
+					stats.order_later++
+					break
+				default:
+					break
+			}
+		})
+
+		stats.averageAmount = stats.total > 0 ? stats.totalAmount / stats.total : 0
+
+		return stats
+	}
+
+	const orderStats = calculateStatistics()
+
+	// Build debug info for boutique filtering when enabled
+	const boutiqueDebugInfo = useMemo(() => {
+		if (!debugBoutique || !boutiqueFilter) return { total: 0, matched: 0, items: [] }
+		const productsList = Array.isArray(products) ? products : []
+		const items = []
+		let matchedCount = 0
+		for (let i = 0; i < Math.min(allOrders.length, 300); i++) {
+			const order = allOrders[i]
+			const rawName = extractOrderProductName(order)
+			const orderName = rawName ? String(rawName).toLowerCase().trim() : ''
+			const normOrder = normalizeName(orderName)
+			let matchedProduct = null
+			let reason = 'none'
+			let normalizedDbName = ''
+			for (const p of productsList) {
+				if (!p?.name) continue
+				const dbName = String(p.name).toLowerCase().trim()
+				const normDb = normalizeName(dbName)
+				const exact = dbName === orderName || normDb === normOrder
+				const allowFuzzy = normOrder.length >= 4 && normDb.length >= 4
+				const fuzzy = allowFuzzy && (dbName.includes(orderName) || orderName.includes(dbName) || normDb.includes(normOrder) || normOrder.includes(normDb))
+				if (exact || fuzzy) { matchedProduct = p; reason = exact ? 'exact' : 'fuzzy'; normalizedDbName = normDb; break }
+			}
+			let passes = false
+			let locId = matchedProduct?.location_id ?? null
+			if (!rawName) {
+				passes = boutiqueFilter === 'no_match'
+				if (passes) matchedCount++
+			} else if (!matchedProduct) {
+				passes = boutiqueFilter === 'no_match'
+				if (passes) matchedCount++
+			} else if (boutiqueFilter === 'has_match') {
+				passes = true; matchedCount++
+			} else {
+				passes = String(locId) === String(boutiqueFilter)
+				if (passes) matchedCount++
+			}
+			items.push({
+				id: order.id,
+				order_number: order.order_number,
+				rawName,
+				normOrder,
+				matchedProductId: matchedProduct?.id ?? null,
+				matchedProductName: matchedProduct?.name ?? null,
+				normalizedDbName,
+				matchedLocationId: locId,
+				boutiqueFilter,
+				passes,
+				reason,
+			})
+		}
+		return { total: allOrders.length, matched: matchedCount, items }
+	}, [debugBoutique, boutiqueFilter, allOrders, products])
+
+	useEffect(() => {
+		if (!debugBoutique || !boutiqueFilter) return
+		console.group('🏪 Boutique Filter Debug')
+		console.log('Filter:', boutiqueFilter)
+		console.log('Orders total:', allOrders.length)
+		console.log('Products loaded:', products.length)
+		console.log('Locations loaded:', locations.length)
+		console.log('Derived filtered:', derivedFilteredOrders.length)
+		console.log('Sample debug items:', boutiqueDebugInfo.items.slice(0, 5))
+		console.groupEnd()
+	}, [debugBoutique, boutiqueFilter, allOrders.length, products.length, locations.length, derivedFilteredOrders.length, boutiqueDebugInfo.items])
+
 	const fetchOrders = useCallback(async () => {
 		try {
 			setLoading(true)
 			setError(null)
-			const params = buildQuery()
+			// Always fetch all orders for client-side filtering
+			const params = { page: 1, limit: 10000, sort_by: 'created_at', sort_order: 'DESC' }
+			// Keep server-side filters that don't conflict with client-side
+			if (!debouncedSearch && !boutiqueFilter) {
+				if (statusFilter) params.status = statusFilter
+				if (assignedFilter && assignedFilter !== 'null' && assignedFilter !== 'not_null') {
+					params.assigned_to = assignedFilter
+				}
+			}
 			const res = await orderService.getOrders(params)
-			const list = Array.isArray(res?.orders) ? res.orders : []
-			const pg = res?.pagination || { page: 1, pages: 1, total: list.length, limit }
-			setOrders(list)
-			// Clear selection when new page loads
+			const all = Array.isArray(res?.orders) ? res.orders : []
+			setAllOrders(all)
 			setSelectedIds(new Set())
-			setPage(pg.page || 1)
-			setTotalPages(pg.pages || 1)
-			setTotalItems(pg.total || list.length)
 		} catch (e) {
 			setError(e?.response?.data?.error || e?.message || 'Failed to load orders')
 		} finally {
 			setLoading(false)
 		}
-	}, [buildQuery, limit])
+	}, [statusFilter, assignedFilter, debouncedSearch, boutiqueFilter])
+
+	// Client-side pagination of filtered results
+	const paginatedOrders = useMemo(() => {
+		const start = (page - 1) * limit
+		const end = start + limit
+		return derivedFilteredOrders.slice(start, end)
+	}, [derivedFilteredOrders, page, limit])
+
+	// Update pagination info when filtered results change
+	useEffect(() => {
+		const totalFiltered = derivedFilteredOrders.length
+		const pages = Math.max(1, Math.ceil(totalFiltered / limit))
+		setTotalPages(pages)
+		setTotalItems(totalFiltered)
+		if (page > pages) {
+			setPage(1)
+		}
+	}, [derivedFilteredOrders.length, limit, page])
+
+	// Use paginated orders for display
+	useEffect(() => {
+		setOrders(paginatedOrders)
+	}, [paginatedOrders])
 
 	// Initial load + whenever filters/pagination change
 	useEffect(() => {
@@ -305,6 +772,32 @@ export default function OrderManagmentHTML() {
 	useEffect(() => {
 		fetchUsersIfNeeded()
 	}, [fetchUsersIfNeeded])
+
+	// Load locations once
+	useEffect(() => {
+		fetchLocations()
+	}, [fetchLocations])
+
+	// Load products on component mount (needed for product link matching)
+	useEffect(() => {
+		if (!products.length && !loadingProducts) {
+			fetchProducts()
+		}
+	}, [products.length, loadingProducts, fetchProducts])
+
+	// Ensure we have products when Boutique filter is active
+	useEffect(() => {
+		if (boutiqueFilter && !products.length && !loadingProducts) {
+			fetchProducts()
+		}
+	}, [boutiqueFilter, products.length, loadingProducts, fetchProducts])
+
+	// Re-apply boutique filter as soon as products become available
+	useEffect(() => {
+		if (boutiqueFilter && products.length && !loadingProducts) {
+			fetchOrders()
+		}
+	}, [products.length, loadingProducts])
 
 		// Wilayas/Baladias helpers
 		const loadWilayas = useCallback(async () => {
@@ -358,21 +851,99 @@ export default function OrderManagmentHTML() {
 				return
 			}
 		}
+		
+		// Add to loading set
+		setStatusUpdatingIds(prev => new Set([...prev, orderId]))
+		
 		try {
 				// Optimistic update
 				const current = orders.find(o => o.id === orderId)
+				const oldStatus = current?.status
 			setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o)))
 				await orderService.updateOrderStatus(orderId, newStatus)
+				
+				// Reduce stock quantity when order becomes confirmed and has matched product
+				if (newStatus === 'confirmed' && oldStatus !== 'confirmed' && current) {
+					try {
+						const productName = extractOrderProductName(current)
+						if (productName && products.length > 0) {
+							const productsList = Array.isArray(products) ? products : []
+							let matchedProduct = null
+							for (const p of productsList) {
+								if (!p?.name) continue
+								const dbName = String(p.name).toLowerCase().trim()
+								const orderName = String(productName).toLowerCase().trim()
+								const normDb = normalizeName(dbName)
+								const normOrder = normalizeName(orderName)
+								const exact = dbName === orderName || normDb === normOrder
+								const allowFuzzy = normOrder.length >= 4 && normDb.length >= 4
+								const fuzzy = allowFuzzy && (dbName.includes(orderName) || orderName.includes(dbName) || normDb.includes(normOrder) || normOrder.includes(normDb))
+								if (exact || fuzzy) {
+									matchedProduct = p
+									break
+								}
+							}
+							if (matchedProduct) {
+								const quantity = Number(current.quantity) || Number(current.quantity_ordered) || 1
+								const locationId = matchedProduct.location_id || current.location_id || 1
+								console.log('🔍 Stock reduction attempt:', {
+									orderId,
+									productId: matchedProduct.id,
+									productName: matchedProduct.name,
+									locationId,
+									quantity,
+									orderData: current
+								})
+								try {
+									// Use stock adjustment API (decrease stock)
+									await stockService.adjustStock({
+										product_id: matchedProduct.id,
+										location_id: locationId,
+										adjustment_type: 'decrease',
+										quantity: quantity,
+										reason: 'Order confirmed',
+										notes: `Order #${orderId} confirmed - automatic stock reduction`
+									})
+									console.log(`✅ Successfully reduced stock for product ${matchedProduct.name} by ${quantity} units`)
+								} catch (stockError) {
+									console.warn('❌ Failed to reduce stock:', stockError)
+									// Don't block status update for stock reduction failure
+								}
+							} else {
+								console.log('❌ No matched product found for stock reduction. Order product name:', productName)
+							}
+						}
+					} catch (productMatchError) {
+						console.warn('Failed to match product for stock reduction:', productMatchError)
+					}
+				}
+				
 				// Mirror to Google Sheets if applicable (non-blocking)
 				if (current) updateOrderStatusInGoogleSheets(current, newStatus)
+				// Success notification
+				if (newStatus === 'import_to_delivery_company') {
+					alert(t('orders.sentToDeliveryCompany') || 'Order sent to delivery company')
+				} else {
+					alert(t('orders.statusUpdated') || 'Status updated')
+				}
 		} catch (e) {
 			// Revert by refetching minimal page
 			await fetchOrders()
 			alert('Failed to update status')
+		} finally {
+			// Remove from loading set
+			setStatusUpdatingIds(prev => {
+				const newSet = new Set([...prev])
+				newSet.delete(orderId)
+				return newSet
+			})
 		}
 	}
 
 	const handleAssign = async (orderId, userIdOrNull) => {
+		// Add to loading set
+		setAssigningIds(prev => new Set([...prev, orderId]))
+		
 		try {
 			setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, assigned_to: userIdOrNull ? Number(userIdOrNull) : null } : o)))
 			if (userIdOrNull) {
@@ -384,6 +955,13 @@ export default function OrderManagmentHTML() {
 		} catch (e) {
 			await fetchOrders()
 			alert(t('orders.assignError') || 'Failed to assign order')
+		} finally {
+			// Remove from loading set
+			setAssigningIds(prev => {
+				const newSet = new Set(prev)
+				newSet.delete(orderId)
+				return newSet
+			})
 		}
 	}
 
@@ -406,6 +984,39 @@ export default function OrderManagmentHTML() {
 					productDetails = typeof order.product_details === 'string' ? JSON.parse(order.product_details) : (order.product_details || {})
 				} catch { productDetails = {} }
 				editProductDetailsRef.current = productDetails
+
+				// Find external_link from matched product
+				let externalLink = ''
+				const productName = productDetails.name
+				console.log('🔍 Product link debug:', {
+					productName,
+					productsCount: products.length,
+					productDetails,
+					sampleProducts: products.slice(0, 3).map(p => ({ id: p.id, name: p.name, external_link: p.external_link }))
+				})
+				if (productName && products.length > 0) {
+					const matchedProduct = products.find(p => {
+						if (!p?.name) return false
+						const dbName = String(p.name).toLowerCase().trim()
+						const orderName = String(productName).toLowerCase().trim()
+						const matches = dbName === orderName || dbName.includes(orderName) || orderName.includes(dbName)
+						console.log('🔍 Product matching:', { dbName, orderName, matches })
+						return matches
+					})
+					if (matchedProduct?.external_link) {
+						externalLink = matchedProduct.external_link
+						console.log('🔗 Product link found:', {
+							orderProduct: productName,
+							matchedProduct: matchedProduct.name,
+							externalLink
+						})
+					} else {
+						console.log('🔗 No product link found for:', productName, 'Matched product:', matchedProduct?.name, 'Has external_link:', !!matchedProduct?.external_link)
+					}
+				} else {
+					console.log('🔗 Cannot search for product link - productName:', productName, 'products count:', products.length)
+				}
+
 			setEditData({
 				customer_name: order.customer_name || '',
 				customer_phone: order.customer_phone || '',
@@ -415,7 +1026,7 @@ export default function OrderManagmentHTML() {
 						notes: order.notes || '',
 						quantity: order.quantity ?? 1,
 						final_total: order.final_total ?? Number(order.total_amount || 0) * Number(order.quantity || 1) + Number(order.delivery_price || 0),
-				status: order.status || 'pending',
+				status: isOrderOlderThan7Days(order.created_at) && order.status === 'pending' ? 'order_later' : (order.status || 'pending'),
 				assigned_to: order.assigned_to ?? '',
 				wilaya_id: order.wilaya_id || '',
 				baladia_id: order.baladia_id || '',
@@ -423,10 +1034,16 @@ export default function OrderManagmentHTML() {
 				delivery_price: order.delivery_price ?? '',
 				weight: order.weight || 1,
 						ecotrack_station_code: order.ecotrack_station_code || '',
-						product_link: productDetails.external_link || productDetails.product_link || '',
+						external_link: externalLink,
 	          product_name: productDetails.name || '',
 	          product_variant: productDetails.variant || productDetails.matched_variant_name || ''
 			})
+			
+			// Show notification if order was automatically set to order_later
+			if (isOrderOlderThan7Days(order.created_at) && order.status === 'pending') {
+				console.log('📅 Order older than 7 days - status automatically set to "order_later"')
+				// You could also show a toast notification here if you have a toast system
+			}
 							finalTotalManualRef.current = false
 			setEditOpen(true)
 			fetchUsersIfNeeded()
@@ -485,6 +1102,16 @@ export default function OrderManagmentHTML() {
 					const next = { ...p, [field]: value }
 					if (field === 'wilaya_id') {
 						next.baladia_id = ''
+						// Reset EcoTrack station when wilaya changes for stop_desk delivery
+						if (next.delivery_type === 'stop_desk') {
+							next.ecotrack_station_code = ''
+						}
+					}
+					// Reset EcoTrack station when delivery type changes to stop_desk
+					if (field === 'delivery_type') {
+						if (value === 'stop_desk') {
+							next.ecotrack_station_code = ''
+						}
 					}
 					// Keep final_total in sync when these change
 						if (field === 'final_total') {
@@ -625,13 +1252,9 @@ export default function OrderManagmentHTML() {
 								// Merge product link into product_details JSON
 								const currentPD = editProductDetailsRef.current || {}
 								const updatedPD = { ...currentPD }
-										if (typeof draft.product_link === 'string') {
-									if (draft.product_link.trim() === '') {
-										delete updatedPD.external_link
-									} else {
-										updatedPD.external_link = draft.product_link.trim()
-									}
-								}
+			if (editData.external_link && editData.external_link.trim()) {
+				updatedPD.external_link = editData.external_link.trim()
+			}
 										if (typeof draft.product_name === 'string' && draft.product_name.trim()) {
 											updatedPD.name = draft.product_name.trim()
 										}
@@ -658,11 +1281,22 @@ export default function OrderManagmentHTML() {
 				} catch {}
 				// Also refetch from server to ensure full consistency (server-side computed fields)
 				try { await fetchOrders() } catch {}
+				// Success notification
+				if (payload.status && payload.status !== editOriginal.status) {
+					if (payload.status === 'import_to_delivery_company') {
+						alert(t('orders.sentToDeliveryCompany') || 'Order sent to delivery company')
+					} else {
+						alert(t('orders.statusUpdated') || 'Status updated')
+					}
+				} else {
+					alert(t('common.saved') || 'Saved')
+				}
 				setEditOpen(false)
 				setEditOriginal(null)
 				setEditData({})
 			} catch (e) {
-				alert('Failed to save changes')
+				console.error('Save edit error:', e)
+				alert(`Failed to save changes: ${e.message || e}`)
 			} finally {
 				setEditLoading(false)
 			}
@@ -678,7 +1312,7 @@ export default function OrderManagmentHTML() {
 	// Reset to page 1 when filters change
 	useEffect(() => {
 		setPage(1)
-	}, [statusFilter, assignedFilter, debouncedSearch, limit])
+	}, [statusFilter, assignedFilter, debouncedSearch, limit, boutiqueFilter])
 
 	const onSubmitSearch = (e) => {
 		e?.preventDefault()
@@ -711,6 +1345,7 @@ export default function OrderManagmentHTML() {
 
 	const bulkAssign = async () => {
 		if (!bulkAssignUserId) return alert(t('orders.selectUserFirst') || 'Pick a user')
+		setBulkActionLoading(true)
 		try {
 			for (const id of selectedIds) {
 				await handleAssign(id, bulkAssignUserId)
@@ -720,41 +1355,211 @@ export default function OrderManagmentHTML() {
 			setBulkAssignUserId('')
 		} catch (_) {
 			// per-item errors handled inside handleAssign
+		} finally {
+			setBulkActionLoading(false)
+		}
+	}
+
+	const bulkUnassign = async () => {
+		if (selectedIds.size === 0) {
+			alert(t('orders.selectOrdersToUnassign') || 'Please select orders to unassign')
+			return
+		}
+		setBulkActionLoading(true)
+		try {
+			let successCount = 0
+			let errorCount = 0
+			for (const id of selectedIds) {
+				try {
+					await handleAssign(id, null)
+					successCount++
+				} catch (error) {
+					errorCount++
+					console.error(`Failed to unassign order ${id}:`, error)
+				}
+			}
+			if (successCount > 0) {
+				alert(t('orders.bulkUnassignSuccess', { count: successCount }) || `Successfully unassigned ${successCount} orders`)
+			}
+			if (errorCount > 0) {
+				alert(t('orders.bulkUnassignError', { count: errorCount }) || `Failed to unassign ${errorCount} orders`)
+			}
+			await fetchOrders()
+			clearSelection()
+		} catch (error) {
+			alert(t('orders.bulkUnassignError') || 'Failed to perform bulk unassignment')
+		} finally {
+			setBulkActionLoading(false)
 		}
 	}
 
 	const bulkSendToDeliveryCompany = async () => {
+		setBulkActionLoading(true)
 		try {
-			let processed = 0
-			let skipped = 0
+			let successCount = 0
+			let failedCount = 0
+			let skippedCount = 0
+			const results = {
+				success: [],
+				failed: [],
+				skipped: [],
+				ecotrackCreated: [],
+				ecotrackFailed: []
+			}
+
 			for (const id of selectedIds) {
 				const o = orders.find(x => x.id === id)
-				if (!o || o.status !== 'confirmed') { skipped++; continue }
-				setOrders((prev) => prev.map((oo) => (oo.id === id ? { ...oo, status: 'import_to_delivery_company' } : oo)))
+				if (!o || o.status !== 'confirmed') { 
+					skippedCount++
+					results.skipped.push({ id, orderNumber: o?.order_number || `ID-${id}`, reason: o ? 'Not confirmed' : 'Order not found' })
+					continue 
+				}
+				
+				// Step 1: Create EcoTrack order first (POST method)
+				let ecotrackSuccess = false
+				let ecotrackError = null
+				
 				try {
-					await orderService.updateOrderStatus(id, 'import_to_delivery_company')
-					// Update Google Sheets for this order if it originated from Google
-					updateOrderStatusInGoogleSheets(o, 'import_to_delivery_company')
-					processed++
+					const ecotrackResponse = await fetch('/api/ecotrack/create-order', {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							'Authorization': `Bearer ${localStorage.getItem('token')}`
+						},
+						body: JSON.stringify({
+							orderId: id,
+							orderData: {
+								order_id: id,
+								customer_name: o.customer_name,
+								customer_phone: o.customer_phone,
+								customer_address: o.customer_address,
+								customer_city: o.customer_city,
+								total_amount: o.total_amount,
+								delivery_type: o.delivery_type,
+								delivery_price: o.delivery_price,
+								weight: o.weight || o.product_weight || 1,
+								wilaya_id: o.wilaya_id,
+								baladia_id: o.baladia_id,
+								ecotrack_station_code: o.ecotrack_station_code || o.station_code,
+								// Add order number for better tracking
+								order_number: o.order_number
+							}
+						})
+					})
+					
+					if (!ecotrackResponse.ok) {
+						// Try to get specific error message from response
+						let specificError = `HTTP ${ecotrackResponse.status}: ${ecotrackResponse.statusText}`
+						try {
+							const errorData = await ecotrackResponse.json()
+							if (errorData && errorData.error) {
+								specificError = errorData.error
+							} else if (errorData && errorData.message) {
+								specificError = errorData.message
+							}
+						} catch (parseError) {
+							// Keep the original HTTP error if we can't parse JSON
+						}
+						ecotrackError = specificError
+						results.ecotrackFailed.push({ id, orderNumber: o.order_number, error: ecotrackError })
+					} else {
+						let ecotrackData
+						try {
+							ecotrackData = await ecotrackResponse.json()
+						} catch (jsonError) {
+							ecotrackError = 'Invalid JSON response from EcoTrack API'
+							results.ecotrackFailed.push({ id, orderNumber: o.order_number, error: ecotrackError })
+						}
+						
+						if (ecotrackData && ecotrackData.success) {
+							ecotrackSuccess = true
+							results.ecotrackCreated.push({ 
+								id, 
+								orderNumber: o.order_number, 
+								ecotrackId: ecotrackData.data?.tracking_id || ecotrackData.data?.ecotrack_order_id || ecotrackData.data?.id || 'Unknown'
+							})
+						} else {
+							ecotrackError = ecotrackData?.error || ecotrackData?.message || 'Failed to create EcoTrack order'
+							results.ecotrackFailed.push({ id, orderNumber: o.order_number, error: ecotrackError })
+						}
+					}
 				} catch (e) {
-					// count as skipped on failure
-					skipped++
+					ecotrackError = e.message || 'Network error creating EcoTrack order'
+					results.ecotrackFailed.push({ id, orderNumber: o.order_number, error: ecotrackError })
+				}
+				
+				// Step 2: Only count as success if EcoTrack order creation was successful
+				if (ecotrackSuccess) {
+					// Note: Backend automatically updates status to 'out_for_delivery' when EcoTrack order is created
+					// No need to update status here as it would conflict with backend logic
+					successCount++
+					results.success.push({ id, orderNumber: o.order_number })
+				} else {
+					// EcoTrack order creation failed, count as failed
+					failedCount++
+					results.failed.push({ id, orderNumber: o.order_number, error: ecotrackError || 'EcoTrack order creation failed' })
 				}
 			}
+
 			await fetchOrders()
 			clearSelection()
-			if (skipped > 0) {
-				alert(t('orders.onlyConfirmedOrdersAllowed') || 'Only confirmed orders can be sent to delivery company')
+			
+			// Create detailed summary message with EcoTrack creation results
+			let message = `📦 Bulk Send to Delivery Company Results:\n\n`
+			message += `✅ Successfully sent: ${successCount} orders\n`
+			message += `🚚 EcoTrack orders created: ${results.ecotrackCreated.length}\n`
+			if (failedCount > 0) {
+				message += `❌ Failed: ${failedCount} orders\n`
 			}
-		} catch (_) {
+			if (results.ecotrackFailed.length > 0) {
+				message += `🚫 EcoTrack creation failed: ${results.ecotrackFailed.length} orders\n`
+			}
+			if (skippedCount > 0) {
+				message += `⏭️ Skipped: ${skippedCount} orders (only confirmed orders allowed)\n`
+			}
+			
+			if (results.ecotrackCreated.length > 0) {
+				message += `\n✅ Successfully created EcoTrack orders for:\n`
+				results.ecotrackCreated.forEach(item => {
+					message += `- Order #${item.orderNumber}${item.ecotrackId ? ` (EcoTrack ID: ${item.ecotrackId})` : ''}\n`
+				})
+			}
+			
+			if (results.ecotrackFailed.length > 0) {
+				message += `\n❌ EcoTrack creation failed for:\n`
+				results.ecotrackFailed.forEach(item => {
+					message += `- Order #${item.orderNumber}: ${item.error}\n`
+				})
+			}
+			
+			if (results.failed.length > 0) {
+				message += `\n❌ Status update failed for:\n`
+				results.failed.forEach(item => {
+					message += `- Order #${item.orderNumber}: ${item.error}\n`
+				})
+			}
+			
+			if (results.skipped.length > 0) {
+				message += `\n⏭️ Skipped orders:\n`
+				results.skipped.forEach(item => {
+					message += `- Order #${item.orderNumber}: ${item.reason}\n`
+				})
+			}
+			
+			alert(message)
+			
+		} catch (error) {
 			await fetchOrders()
-			alert('Failed to update some orders')
+			alert(`Failed to process bulk operation: ${error.message || 'Unknown error'}`)
+		} finally {
+			setBulkActionLoading(false)
 		}
 	}
 
 	const bulkDelete = async () => {
 		if (!canDeleteOrders) return
 		if (!window.confirm(t('orders.bulkDeleteConfirm', { count: selectedIds.size }) || t('common.confirmDelete') || 'Delete selected orders?')) return
+		setBulkActionLoading(true)
 		try {
 			for (const id of selectedIds) {
 				await orderService.deleteOrder(id)
@@ -764,6 +1569,102 @@ export default function OrderManagmentHTML() {
 		} catch (_) {
 			await fetchOrders()
 			alert(t('orders.deleteError') || 'Failed to delete some orders')
+		} finally {
+			setBulkActionLoading(false)
+		}
+	}
+
+	// Distribution helpers: offer three client-side algorithms similar to old interface
+	const getActiveEmployees = useCallback(() => {
+		// Prefer role === 'employee' and active users
+		return (users || []).filter(u => (u.role === 'employee') && (u.is_active !== false))
+	}, [users])
+
+	const computeCurrentWorkload = useCallback((ordersList) => {
+		const counts = new Map()
+		for (const u of getActiveEmployees()) counts.set(u.id, 0)
+		for (const o of ordersList || []) {
+			if (o.assigned_to && (o.status === 'pending' || o.status === 'processing' || o.status === 'on_hold')) {
+				counts.set(o.assigned_to, (counts.get(o.assigned_to) || 0) + 1)
+			}
+		}
+		return counts
+	}, [getActiveEmployees])
+
+	const distributeClientSide = useCallback(async (algorithm = 'round_robin') => {
+		if (!canDistributeOrders) return
+		const employees = getActiveEmployees()
+		if (!employees.length) {
+			alert(t('orders.distributeError') || 'No active employees found')
+			return
+		}
+		// Use all orders (not just filtered page)
+		const unassigned = (allOrders || []).filter(o => !o.assigned_to && o.status === 'pending')
+		if (!unassigned.length) {
+			alert(t('orders.distributeSuccess', { count: 0 }) || 'No unassigned pending orders')
+			return
+		}
+		try {
+			setDistributionLoading(true)
+			let success = 0
+			let idx = 0
+			let workload = computeCurrentWorkload(allOrders)
+			const pickBalanced = () => {
+				let bestUserId = null
+				let bestCount = Infinity
+				for (const u of employees) {
+					const c = workload.get(u.id) ?? 0
+					if (c < bestCount) { bestCount = c; bestUserId = u.id }
+				}
+				return bestUserId
+			}
+			for (const o of unassigned) {
+				let targetUserId
+				switch (algorithm) {
+					case 'balanced':
+						targetUserId = pickBalanced();
+						break
+					case 'performance_based':
+						// Placeholder: without metrics, use balanced strategy
+						targetUserId = pickBalanced();
+						break
+					case 'round_robin':
+					default:
+						targetUserId = employees[idx % employees.length].id
+				}
+				try {
+					await handleAssign(o.id, targetUserId)
+					success++
+					// Update local workload to reflect assignment
+					workload.set(targetUserId, (workload.get(targetUserId) || 0) + 1)
+				} catch (e) {
+					console.error('Failed to assign during distribution:', e)
+				}
+				idx++
+			}
+			alert(t('orders.distributeSuccess', { count: success }) || `Distributed ${success} orders`)
+			await fetchOrders()
+		} catch (e) {
+			console.error('Distribution error:', e)
+			alert(t('orders.distributeError') || 'Failed to distribute orders')
+		} finally {
+			setDistributionLoading(false)
+		}
+	}, [canDistributeOrders, getActiveEmployees, allOrders, computeCurrentWorkload, handleAssign, fetchOrders, t])
+
+	const handleDistribute = async () => {
+		// Keep original quick distribute calling backend for parity
+		try {
+			setDistributionLoading(true)
+			const res = await orderService.distributeOrders()
+			const count = res?.distributed ?? res?.count ?? res?.distributedCount ?? 0
+			alert(t('orders.distributeSuccess', { count }) || `Distributed ${count} orders`)
+			await fetchOrders()
+		} catch (e) {
+			console.error('Distribution error:', e)
+			alert(t('orders.distributeError') || 'Failed to distribute orders')
+		} finally {
+			setDistributionLoading(false)
 		}
 	}
 
@@ -772,9 +1673,8 @@ export default function OrderManagmentHTML() {
 	// Export current filtered orders (all pages) to Excel only
 	const handleExportExcel = useCallback(async () => {
 		try {
-			const params = { ...buildQuery(), page: 1, limit: 10000 }
-			const res = await orderService.getOrders(params)
-			const data = Array.isArray(res?.orders) ? res.orders : []
+			// Use the filtered results for export instead of re-querying
+			const data = derivedFilteredOrders
 			if (!data.length) { alert(t('common.noData') || 'Nothing to export'); return }
 			const rows = data.map(o => ({
 				order_number: o.order_number,
@@ -797,7 +1697,7 @@ export default function OrderManagmentHTML() {
 		} catch (e) {
 			alert(t('common.exportError') || 'Export failed')
 		}
-	}, [buildQuery, t])
+	}, [derivedFilteredOrders, t])
 
 	const hasSelection = selectedIds.size > 0
 	const allSelectedConfirmed = hasSelection && Array.from(selectedIds).every(id => {
@@ -805,9 +1705,86 @@ export default function OrderManagmentHTML() {
 		return o && o.status === 'confirmed'
 	})
 
+	// Helper: find boutique for an order by matching product name to products list
+	const getOrderProductBoutique = useCallback((order) => {
+		if (!order?.product_details || !products.length || !locations.length) return null
+		try {
+			const pd = typeof order.product_details === 'string' ? JSON.parse(order.product_details) : order.product_details
+			const name = (pd?.name || '').toString().trim()
+			if (!name) return null
+			const norm = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/gi, '').replace(/\s+/g, ' ').trim()
+			const target = norm(name)
+			const matched = products.find(p => {
+				const pname = (p.name || '').toString()
+				if (!pname) return false
+				const np = norm(pname)
+				return np === target || np.includes(target) || target.includes(np)
+			})
+			if (matched?.location_id) {
+				const loc = locations.find(l => String(l.id) === String(matched.location_id))
+				return {
+					productId: matched.id,
+					productName: matched.name,
+					locationId: matched.location_id,
+					locationName: loc ? loc.name : `Location ${matched.location_id}`,
+					location: loc || null
+				}
+			}
+			return null
+		} catch {
+			return null
+		}
+	}, [products, locations])
+
 	return (
 		<div className={`om-wrap ${hasSelection ? 'has-bulkbar' : ''}`}>
 			<h1 className="om-title">{t('orders.orderManagement') || 'Order Management'}</h1>
+
+			{/* Tab Navigation */}
+			<div className="om-tabs">
+				<button 
+					className={`om-tab ${activeTab === 'orders' ? 'active' : ''}`}
+					onClick={() => setActiveTab('orders')}
+				>
+					{t('orders.orders') || 'Orders'} ({tabCounts.regular})
+				</button>
+				<button 
+					className={`om-tab ${activeTab === 'delayed' ? 'active' : ''}`}
+					onClick={() => setActiveTab('delayed')}
+				>
+					{t('orders.delayedOrders') || 'Delayed Orders'} ({tabCounts.delayed}) 
+					</button>
+			</div>
+
+			{/* Statistics Section */}
+			<div className="om-statistics">
+				<div className="stats-row">
+					<div className="stat-card stat-pending">
+						<div className="stat-title">{t('orders.statistics.pending') || 'En Attente'}</div>
+						<div className="stat-value">{orderStats.pending}</div>
+					</div>
+					<div className="stat-card stat-confirmed">
+						<div className="stat-title">{t('orders.statistics.confirmed') || 'Confirmées'}</div>
+						<div className="stat-value">{orderStats.confirmed}</div>
+					</div>
+					<div className="stat-card stat-processing">
+						<div className="stat-title">{t('orders.statistics.processing') || 'En Traitement'}</div>
+						<div className="stat-value">{orderStats.processing}</div>
+					</div>
+					<div className="stat-card stat-delivery">
+						<div className="stat-title">{t('orders.statistics.outForDelivery') || 'En cours de livraison'}</div>
+						<div className="stat-value">{orderStats.out_for_delivery}</div>
+					</div>
+					<div className="stat-card stat-delivered">
+						<div className="stat-title">{t('orders.statistics.delivered') || 'Livrées'}</div>
+						<div className="stat-value">{orderStats.delivered}</div>
+					</div>
+					<div className="stat-card stat-cancelled">
+						<div className="stat-title">{t('orders.statistics.cancelled') || 'Annulées'}</div>
+						<div className="stat-value">{orderStats.cancelled}</div>
+					</div>
+				</div>
+			</div>
 
 			<form className="om-filters" onSubmit={onSubmitSearch}>
 				<div className="row">
@@ -827,7 +1804,7 @@ export default function OrderManagmentHTML() {
 					<Select value={statusFilter} onChange={setStatusFilter}>
 						<option value="">{t('common.all') || 'All'}</option>
 						{STATUS_OPTIONS.map((s) => (
-							<option key={s} value={s}>{s}</option>
+							<option key={s} value={s}>{getStatusLabel(s, t)}</option>
 						))}
 					</Select>
 
@@ -847,6 +1824,16 @@ export default function OrderManagmentHTML() {
 						)}
 					</Select>
 
+					<label>{t('orders.boutique') || 'Boutique'}</label>
+					<Select value={boutiqueFilter} onChange={setBoutiqueFilter}>
+						<option value="">{t('common.all') || 'All'}</option>
+						<option value="has_match">{t('orders.hasMatch') || 'Has Match'}</option>
+						<option value="no_match">{t('orders.noMatch') || 'No Match'}</option>
+						{locations.map((loc) => (
+							<option key={loc.id} value={String(loc.id)}>{loc.name}</option>
+						))}
+					</Select>
+
 					<label>{t('common.pageSize') || 'Page size'}</label>
 					<Select value={String(limit)} onChange={(v) => setLimit(Number(v))}>
 						{[10, 20, 50, 100].map((n) => (
@@ -856,6 +1843,19 @@ export default function OrderManagmentHTML() {
 
 					<span style={{ marginLeft: 12 }} />
 					<Button onClick={handleExportExcel}>{t('common.exportExcel') || 'Export Excel'}</Button>
+					{canDistributeOrders && (
+						<span style={{ display: 'inline-flex', gap: 6, marginLeft: 8, flexWrap: 'wrap' }}>
+							<Button onClick={() => distributeClientSide('round_robin')} disabled={distributionLoading}>
+								{distributionLoading ? (t('common.loading') || 'Loading...') : (t('orders.distributeRoundRobin') || 'Round Robin')}
+							</Button>
+							<Button onClick={() => distributeClientSide('balanced')} disabled={distributionLoading}>
+								{distributionLoading ? (t('common.loading') || 'Loading...') : (t('orders.distributeBalanced') || 'Balanced')}
+							</Button>
+							<Button onClick={() => distributeClientSide('performance_based')} disabled={distributionLoading}>
+								{distributionLoading ? (t('common.loading') || 'Loading...') : (t('orders.distributePerformanceBased') || 'Performance-based')}
+							</Button>
+						</span>
+					)}
 				</div>
 			</form>
 
@@ -870,26 +1870,80 @@ export default function OrderManagmentHTML() {
 						{canAssignOrders && (
 							<span style={{ marginLeft: 16 }}>
 								<label style={{ marginRight: 6 }}>{t('orders.assignTo') || 'Assign to'}</label>
-								<Select value={bulkAssignUserId} onChange={setBulkAssignUserId} style={{ maxWidth: 220 }}>
+								<Select 
+									value={bulkAssignUserId} 
+									onChange={setBulkAssignUserId} 
+									style={{ maxWidth: 220 }}
+									disabled={bulkActionLoading}
+								>
 									<option value="">{t('orders.selectUser') || 'Select user'}</option>
 									{users.map(u => (
 										<option key={u.id} value={String(u.id)}>{u.first_name || ''} {u.last_name || ''} ({u.username})</option>
 									))}
 								</Select>
-								<Button onClick={bulkAssign} style={{ marginLeft: 6 }}>{t('orders.apply') || 'Apply'}</Button>
+								<Button onClick={bulkAssign} style={{ marginLeft: 6 }} disabled={bulkActionLoading}>
+									{bulkActionLoading ? (t('common.loading') || 'Loading...') : (t('orders.apply') || 'Apply')}
+								</Button>
+								<Button onClick={bulkUnassign} style={{ marginLeft: 6 }} disabled={bulkActionLoading}>
+									{bulkActionLoading ? (t('common.loading') || 'Loading...') : (t('orders.bulkUnassign') || 'Désassignation en Masse')}
+								</Button>
 							</span>
 						)}
 						<span style={{ marginLeft: 16 }}>
-							<Button onClick={bulkSendToDeliveryCompany} disabled={!allSelectedConfirmed}>
-								{t('orders.sendToDeliveryCompany') || 'Send to Delivery Company'}
+							<Button onClick={bulkSendToDeliveryCompany} disabled={!allSelectedConfirmed || bulkActionLoading}>
+								{bulkActionLoading ? (t('common.loading') || 'Loading...') : (t('orders.sendToDeliveryCompany') || 'Send to Delivery Company')}
 							</Button>
 						</span>
 						{canDeleteOrders && (
 							<span style={{ marginLeft: 16 }}>
-								<Button onClick={bulkDelete}>{t('common.delete') || 'Delete'}</Button>
+								<Button onClick={bulkDelete} disabled={bulkActionLoading}>
+									{bulkActionLoading ? (t('common.loading') || 'Loading...') : (t('common.delete') || 'Delete')}
+								</Button>
 							</span>
 						)}
 					</div>
+				)}
+				{boutiqueFilter && (
+					<div className="om-hint" style={{ margin: '8px 0', fontSize: 12, color: '#666' }}>
+						{t('orders.filterByBoutique') || 'Filter by Boutique'}: {String(boutiqueFilter)} — {t('common.results') || 'results'}: {derivedFilteredOrders.length}
+					</div>
+				)}
+				{debugBoutique && boutiqueFilter && (
+					<details style={{ margin: '4px 0 10px' }} open>
+						<summary style={{ cursor: 'pointer', fontSize: 12 }}>
+							Debug details (showing up to {boutiqueDebugInfo.items.length} of {boutiqueDebugInfo.total}). Matched count: {boutiqueDebugInfo.matched}
+						</summary>
+						<div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid #ddd', padding: 6 }}>
+							<table style={{ width: '100%', borderCollapse: 'collapse' }}>
+								<thead>
+									<tr>
+										<th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>ID</th>
+										<th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Order #</th>
+										<th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Name</th>
+										<th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Norm Name</th>
+										<th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Matched Product</th>
+										<th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Matched Loc</th>
+										<th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Passes</th>
+										<th style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>Reason</th>
+									</tr>
+								</thead>
+								<tbody>
+									{boutiqueDebugInfo.items.slice(0, 50).map((it) => (
+										<tr key={it.id}>
+											<td>{it.id}</td>
+											<td>{it.order_number}</td>
+											<td className="truncate" title={it.rawName || ''}>{it.rawName || ''}</td>
+											<td className="truncate" title={it.normOrder || ''}>{it.normOrder || ''}</td>
+											<td className="truncate" title={it.matchedProductName || ''}>{it.matchedProductName || ''}</td>
+											<td>{it.matchedLocationId ?? '-'}</td>
+											<td style={{ color: it.passes ? 'green' : 'crimson' }}>{String(it.passes)}</td>
+											<td>{it.reason}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+					</details>
 				)}
 				<table className="om-table">
 					<thead>
@@ -910,7 +1964,7 @@ export default function OrderManagmentHTML() {
 							<th>{t('orders.status') || 'Status'}</th>
 							<th>{t('common.total') || 'Total'}</th>
 							{canAssignOrders && <th>{t('orders.assignedTo') || 'Assigned To'}</th>}
-							<th>{t('orders.createdAt') || 'Created'}</th>
+							<th>{t('orders.createdAt') || 'Créé le'}</th>
 							<th>{t('orders.notes') || 'Notes'}</th>
 							<th>{t('common.actions') || 'Actions'}</th>
 						</tr>
@@ -935,6 +1989,8 @@ export default function OrderManagmentHTML() {
 								selected={selectedIds.has(o.id)}
 								onToggleSelect={(id, checked) => toggleSelect(id)}
 								t={t}
+								assigningIds={assigningIds}
+								statusUpdatingIds={statusUpdatingIds}
 							/>
 						))}
 					</tbody>
@@ -978,7 +2034,7 @@ export default function OrderManagmentHTML() {
 													<div className="om-form-grid">
 														  <label>{t('orders.status') || 'Status'}
 															<Select value={editData.status} onChange={(v) => handleEditChange('status', v)}>
-																{STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+																{STATUS_OPTIONS.map(s => <option key={s} value={s}>{getStatusLabel(s, t)}</option>)}
 															</Select>
 														</label>
 														{canAssignOrders && (
@@ -1004,7 +2060,7 @@ export default function OrderManagmentHTML() {
 															<Select value={editData.wilaya_id ?? ''} onChange={(v) => handleEditChange('wilaya_id', v)}>
 																<option value="">{t('delivery.selectWilaya') || 'Select wilaya'}</option>
 																{wilayas.map(w => (
-																	<option key={w.id} value={String(w.id)}>{w.name_fr || w.name_en || w.name_ar} ({w.code})</option>
+																	<option key={w.code} value={String(w.code)}>{w.nom} ({w.code})</option>
 																))}
 															</Select>
 														</label>
@@ -1012,7 +2068,7 @@ export default function OrderManagmentHTML() {
 															<Select value={editData.baladia_id ?? ''} onChange={(v) => handleEditChange('baladia_id', v)} disabled={!editData.wilaya_id || loadingBaladias}>
 																<option value="">{t('delivery.selectBaladia') || 'Select baladia'}</option>
 																{baladias.map(b => (
-																	<option key={b.id} value={String(b.id)}>{b.name_fr || b.name_en || b.name_ar}</option>
+																	<option key={b.id || b.nom} value={String(b.id || b.nom)}>{b.nom || b.name_fr || b.name_en || b.name_ar}</option>
 																))}
 															</Select>
 														</label>
@@ -1027,10 +2083,115 @@ export default function OrderManagmentHTML() {
 															<label>{t('ecotrack.station') || 'EcoTrack Station'}
 																<Select value={editData.ecotrack_station_code ?? ''} onChange={(v) => handleEditChange('ecotrack_station_code', v)} disabled={loadingStations}>
 																	<option value="">{t('ecotrack.selectStation') || 'Select station'}</option>
-																	{ecotrackStations.map(s => (
-																		<option key={s.code} value={s.code}>{s.name} ({s.code})</option>
-																	))}
+																	{(() => {
+																		// Show all stations but prioritize matching ones first
+																		const orderWilayaId = editData.wilaya_id
+																		if (!orderWilayaId) {
+																			// No wilaya selected, show all stations normally
+																			return ecotrackStations.map(s => (
+																				<option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+																			))
+																		}
+																		
+																		// Convert wilaya ID to number for proper comparison
+																		const orderWilayaIdNum = Number(orderWilayaId)
+																		
+																		// Get wilaya details for better matching
+																		const currentWilaya = wilayas.find(w => Number(w.id) === orderWilayaIdNum)
+																		const wilayaName = currentWilaya?.name_fr || currentWilaya?.name_en || currentWilaya?.name_ar || ''
+																		const wilayaCode = currentWilaya?.code || ''
+																		
+																		// Separate stations into matching and non-matching
+																		const matchingStations = []
+																		const otherStations = []
+																		
+																		console.log('🔍 EcoTrack Station Filtering Debug:', {
+																			orderWilayaId,
+																			orderWilayaIdNum,
+																			wilayaName,
+																			wilayaCode,
+																			totalStations: ecotrackStations.length
+																		})
+																		
+																		ecotrackStations.forEach(station => {
+																			// Multiple matching strategies
+																			let isMatch = false
+																			let matchReason = ''
+																			
+																			// Strategy 1: Station ID starts with wilaya code (padded to 2 digits)
+																			const wilayaCodePadded = wilayaCode.toString().padStart(2, '0')
+																			if (station.id && station.id.startsWith(wilayaCodePadded)) {
+																				isMatch = true
+																				matchReason = 'code_prefix'
+																			}
+																			
+																			// Strategy 2: Station name contains wilaya name
+																			if (!isMatch && wilayaName && station.name) {
+																				const stationNameLower = station.name.toLowerCase()
+																				const wilayaNameLower = wilayaName.toLowerCase()
+																				if (stationNameLower.includes(wilayaNameLower) || wilayaNameLower.includes(stationNameLower)) {
+																					isMatch = true
+																					matchReason = 'name_match'
+																				}
+																			}
+																			
+																			// Strategy 3: Extract station wilaya ID from station ID (first 2 digits)
+																			if (!isMatch && station.id && station.id.length >= 2) {
+																				const stationWilayaCode = station.id.substring(0, 2)
+																				if (stationWilayaCode === wilayaCodePadded) {
+																					isMatch = true
+																					matchReason = 'extracted_code'
+																				}
+																			}
+																			
+																			// Strategy 4: Check if station code matches wilaya code
+																			if (!isMatch && station.code && wilayaCode) {
+																				if (station.code.toString().startsWith(wilayaCode.toString())) {
+																					isMatch = true
+																					matchReason = 'station_code_match'
+																				}
+																			}
+																			
+																			if (isMatch) {
+																				matchingStations.push({...station, matchReason})
+																				console.log('✅ Station match:', station.name, station.id, matchReason)
+																			} else {
+																				otherStations.push(station)
+																			}
+																		})
+																		
+																		console.log(`📊 Filter results: ${matchingStations.length} matching, ${otherStations.length} other stations`)
+																		
+																		// Return matching stations first, then all others
+																		return [
+																			...matchingStations.map(s => (
+																				<option key={s.id} value={s.id} style={{backgroundColor: '#e6f7ff', fontWeight: 'bold'}}>
+																					🎯 {s.name} ({s.code || s.id})
+																				</option>
+																			)),
+																			...otherStations.map(s => (
+																				<option key={s.id} value={s.id}>{s.name} ({s.code || s.id})</option>
+																			))
+																		]
+																	})()}
 																</Select>
+																{/* Show selected station info */}
+																{editData.ecotrack_station_code && (() => {
+																	const selectedStation = ecotrackStations.find(station => station.id === editData.ecotrack_station_code)
+																	if (!selectedStation) return null
+																	
+																	return (
+																		<div className="ecotrack-info">
+																			<p><strong>{t('address') || 'Address'}:</strong> {selectedStation.address}</p>
+																			{selectedStation.phones && Object.values(selectedStation.phones).filter(phone => phone).length > 0 && (
+																				<p><strong>{t('phones') || 'Phones'}:</strong> {Object.values(selectedStation.phones).filter(phone => phone).join(', ')}</p>
+																			)}
+																			{selectedStation.map && (
+																				<p><a href={selectedStation.map} target="_blank" rel="noopener noreferrer">{t('viewOnMap') || 'View on Map'}</a></p>
+																			)}
+																		</div>
+																	)
+																})()}
 															</label>
 														)}
 														  <label>{t('delivery.weight') || 'Weight (kg)'}
@@ -1111,7 +2272,23 @@ export default function OrderManagmentHTML() {
 											<TextInput value={editData.product_variant || ''} onChange={(v) => handleEditChange('product_variant', v)} placeholder={t('orders.enterModel') || 'e.g. Color/Size'} />
 								            </label>
 										<label>{t('products.productLink') || t('product.link') || 'Product link'}
-											<TextInput value={editData.product_link} onChange={(v) => handleEditChange('product_link', v)} placeholder={t('products.productLink') || 'https://...'} />
+											<div className="row">
+												<TextInput value={editData.external_link || ''} onChange={(v) => handleEditChange('external_link', v)} placeholder={t('products.productLink') || 'https://...'} />
+												<Button
+													onClick={() => {
+														if (editData.external_link && editData.external_link.trim()) {
+															const url = ensureHttp(editData.external_link)
+															window.open(url, '_blank', 'noopener,noreferrer')
+														} else {
+															alert(t('products.noExternalLink') || 'No external link available')
+														}
+													}}
+													disabled={!editData.external_link || !String(editData.external_link).trim()}
+													className="ml-8"
+												>
+													{t('orders.openLink') || t('products.openExternalLink') || 'Open Link'}
+												</Button>
+											</div>
 								            </label>
 													</div>
 												</div>

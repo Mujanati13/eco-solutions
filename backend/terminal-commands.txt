@@ -1,0 +1,36 @@
+# Copy and paste these commands one by one in your VPS terminal
+
+# 1. Connect to database
+mysql -u eco_user -p eco_system
+
+# 2. Once connected to MySQL, paste these SQL commands:
+
+CREATE TABLE wilayas_backup_production AS SELECT * FROM wilayas;
+
+UPDATE wilayas SET name_fr = 'Bordj Badji Mokhtar', name_ar = 'برج باجي مختار', updated_at = NOW() WHERE id = 50;
+
+UPDATE wilayas SET name_fr = 'Ouled Djellal', name_ar = 'أولاد جلال', updated_at = NOW() WHERE id = 51;
+
+UPDATE wilayas SET name_fr = 'Beni Abbes', name_ar = 'بني عباس', updated_at = NOW() WHERE id = 52;
+
+UPDATE wilayas SET name_fr = 'In Salah', name_ar = 'عين صالح', updated_at = NOW() WHERE id = 53;
+
+UPDATE wilayas SET name_fr = 'In Guezzam', name_ar = 'عين قزام', updated_at = NOW() WHERE id = 54;
+
+UPDATE wilayas SET name_fr = 'Touggourt', name_ar = 'تقرت', updated_at = NOW() WHERE id = 55;
+
+UPDATE wilayas SET name_fr = 'Djanet', name_ar = 'جانت', updated_at = NOW() WHERE id = 56;
+
+UPDATE wilayas SET name_fr = 'El M''Ghair', name_ar = 'المغير', updated_at = NOW() WHERE id = 57;
+
+UPDATE wilayas SET name_fr = 'El Meniaa', name_ar = 'المنيعة', updated_at = NOW() WHERE id = 58;
+
+INSERT IGNORE INTO wilayas (id, code, name_fr, name_ar, name_en, is_active, created_at, updated_at) VALUES (50, '50', 'Bordj Badji Mokhtar', 'برج باجي مختار', 'Bordj Badji Mokhtar', 1, NOW(), NOW());
+
+INSERT IGNORE INTO wilayas (id, code, name_fr, name_ar, name_en, is_active, created_at, updated_at) VALUES (54, '54', 'In Guezzam', 'عين قزام', 'In Guezzam', 1, NOW(), NOW());
+
+# 3. Verify the changes:
+SELECT id, name_fr, name_ar FROM wilayas WHERE id BETWEEN 50 AND 58 ORDER BY id;
+
+# 4. Exit MySQL:
+exit;

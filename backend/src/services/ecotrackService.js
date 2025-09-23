@@ -22,6 +22,79 @@ class EcotrackService {
   }
 
   /**
+   * Format station code to remove leading zeros for EcoTrack API
+   * Example: "05B" -> "5B", "01A" -> "1A"
+   */
+  formatStationCode(stationCode) {
+    if (!stationCode) return stationCode;
+    
+    // Remove leading zeros while preserving the letter suffix
+    // Examples: "05B" -> "5B", "01A" -> "1A", "12A" -> "12A"
+    const match = stationCode.match(/^0*(\d+)([A-Z]*)$/);
+    if (match) {
+      return match[1] + match[2];
+    }
+    
+    // If no match, return original (might already be in correct format)
+    return stationCode;
+  }
+
+  /**
+   * Remove accents from text for EcoTrack API compatibility
+   * @param {string} text - Text to remove accents from
+   * @returns {string} - Text without accents
+   */
+  removeAccents(text) {
+    if (!text || typeof text !== 'string') return text;
+    
+    const accentMap = {
+      'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'ā': 'a', 'ă': 'a', 'ą': 'a',
+      'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e', 'ē': 'e', 'ĕ': 'e', 'ė': 'e', 'ę': 'e', 'ě': 'e',
+      'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i', 'ī': 'i', 'ĭ': 'i', 'į': 'i',
+      'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o', 'ō': 'o', 'ŏ': 'o', 'ő': 'o',
+      'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u', 'ū': 'u', 'ŭ': 'u', 'ů': 'u', 'ű': 'u', 'ų': 'u',
+      'ý': 'y', 'ÿ': 'y', 'ŷ': 'y',
+      'ñ': 'n', 'ń': 'n', 'ň': 'n', 'ņ': 'n',
+      'ç': 'c', 'ć': 'c', 'ĉ': 'c', 'ċ': 'c', 'č': 'c',
+      'ś': 's', 'ŝ': 's', 'ş': 's', 'š': 's',
+      'ź': 'z', 'ż': 'z', 'ž': 'z',
+      'ď': 'd', 'đ': 'd',
+      'ğ': 'g', 'ĝ': 'g', 'ġ': 'g', 'ģ': 'g',
+      'ĥ': 'h', 'ħ': 'h',
+      'ĵ': 'j',
+      'ķ': 'k', 'ĸ': 'k',
+      'ĺ': 'l', 'ļ': 'l', 'ľ': 'l', 'ŀ': 'l', 'ł': 'l',
+      'ŕ': 'r', 'ŗ': 'r', 'ř': 'r',
+      'ţ': 't', 'ť': 't', 'ŧ': 't',
+      'ŵ': 'w',
+      // Uppercase versions
+      'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Ā': 'A', 'Ă': 'A', 'Ą': 'A',
+      'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E', 'Ē': 'E', 'Ĕ': 'E', 'Ė': 'E', 'Ę': 'E', 'Ě': 'E',
+      'Ì': 'I', 'Í': 'I', 'Î': 'I', 'Ï': 'I', 'Ī': 'I', 'Ĭ': 'I', 'Į': 'I',
+      'Ò': 'O', 'Ó': 'O', 'Ô': 'O', 'Õ': 'O', 'Ö': 'O', 'Ō': 'O', 'Ŏ': 'O', 'Ő': 'O',
+      'Ù': 'U', 'Ú': 'U', 'Û': 'U', 'Ü': 'U', 'Ū': 'U', 'Ŭ': 'U', 'Ů': 'U', 'Ű': 'U', 'Ų': 'U',
+      'Ý': 'Y', 'Ÿ': 'Y', 'Ŷ': 'Y',
+      'Ñ': 'N', 'Ń': 'N', 'Ň': 'N', 'Ņ': 'N',
+      'Ç': 'C', 'Ć': 'C', 'Ĉ': 'C', 'Ċ': 'C', 'Č': 'C',
+      'Ś': 'S', 'Ŝ': 'S', 'Ş': 'S', 'Š': 'S',
+      'Ź': 'Z', 'Ż': 'Z', 'Ž': 'Z',
+      'Ď': 'D', 'Đ': 'D',
+      'Ğ': 'G', 'Ĝ': 'G', 'Ġ': 'G', 'Ģ': 'G',
+      'Ĥ': 'H', 'Ħ': 'H',
+      'Ĵ': 'J',
+      'Ķ': 'K',
+      'Ĺ': 'L', 'Ļ': 'L', 'Ľ': 'L', 'Ŀ': 'L', 'Ł': 'L',
+      'Ŕ': 'R', 'Ŗ': 'R', 'Ř': 'R',
+      'Ţ': 'T', 'Ť': 'T', 'Ŧ': 'T',
+      'Ŵ': 'W'
+    };
+    
+    return text.replace(/[^\u0000-\u007E]/g, function(char) {
+      return accentMap[char] || char;
+    });
+  }
+
+  /**
    * Ensure configuration is loaded from database before API calls
    */
   async ensureConfigLoaded() {
@@ -507,61 +580,49 @@ class EcotrackService {
       console.log(`  - orderData.baladia_name: ${orderData.baladia_name}`);
       console.log(`  - orderData.customer_city: ${orderData.customer_city}`);
       
-      const fallbackMapping = this.mapCityToWilayaId(orderData.customer_city || '');
-      console.log(`  - Fallback mapping for "${orderData.customer_city}":`, fallbackMapping);
-      
-      let finalWilayaId = orderData.wilaya_id || fallbackMapping.wilaya_id;
-      let finalCommune = orderData.commune || orderData.baladia_name || orderData.customer_city || fallbackMapping.commune;
+      // Use order's actual wilaya_id and commune data without city-based redirection
+      let finalWilayaId = orderData.wilaya_id;
+      let finalCommune = orderData.commune || orderData.baladia_name;
       
       // Validate and fix wilaya_id for Ecotrack (must be between 1-58)
       if (finalWilayaId > 58 || finalWilayaId < 1) {
         console.log(`⚠️ Invalid wilaya_id ${finalWilayaId} for Ecotrack (must be 1-58)`);
         
-        // Try to map based on customer_city
-        if (orderData.customer_city) {
-          const cityBasedMapping = this.mapCityToWilayaId(orderData.customer_city);
-          if (cityBasedMapping.wilaya_id >= 1 && cityBasedMapping.wilaya_id <= 58) {
-            finalWilayaId = cityBasedMapping.wilaya_id;
-            finalCommune = cityBasedMapping.commune;
-            console.log(`🔄 Remapped to wilaya_id: ${finalWilayaId}, commune: ${finalCommune}`);
+        // For invalid wilaya_id, default to Algiers but keep the original commune
+        finalWilayaId = 16; // Algiers
+        console.log(`🔄 Using default wilaya_id: ${finalWilayaId} for invalid value`);
+      }
+      
+      // Special handling for numeric city names that represent wilaya codes
+      if (orderData.customer_city && /^\d+$/.test(orderData.customer_city)) {
+        const cityAsNumber = parseInt(orderData.customer_city);
+        if (cityAsNumber >= 1 && cityAsNumber <= 58) {
+          finalWilayaId = cityAsNumber;
+          // Get commune from EcoTrack API instead of hardcoded mapping
+          try {
+            const communes = await this.fetchCommunesFromEcoTrack(cityAsNumber);
+            if (communes.length > 0) {
+              // Use the first commune as default
+              finalCommune = communes[0].nom;
+              console.log(`🔢 Mapped numeric city "${orderData.customer_city}" to wilaya_id: ${finalWilayaId}, commune: ${finalCommune} (from EcoTrack API)`);
+            } else {
+              // Fallback to wilaya name if no communes found
+              finalCommune = this.getWilayaNameById(cityAsNumber);
+              console.log(`🔢 Mapped numeric city "${orderData.customer_city}" to wilaya_id: ${finalWilayaId}, commune: ${finalCommune} (fallback)`);
+            }
+          } catch (error) {
+            console.warn(`⚠️ Error fetching communes for wilaya ${cityAsNumber}:`, error.message);
+            finalCommune = this.getWilayaNameById(cityAsNumber);
+            console.log(`🔢 Mapped numeric city "${orderData.customer_city}" to wilaya_id: ${finalWilayaId}, commune: ${finalCommune} (error fallback)`);
           }
-        }
-        
-        // Special handling for numeric city names that represent wilaya codes
-        if (orderData.customer_city && /^\d+$/.test(orderData.customer_city)) {
-          const cityAsNumber = parseInt(orderData.customer_city);
-          if (cityAsNumber >= 1 && cityAsNumber <= 58) {
-            finalWilayaId = cityAsNumber;
-            // Map to appropriate commune based on wilaya
-            const wilayaCommunes = {
-              16: 'Alger Centre',  // Algiers
-              21: 'Skikda',        // Skikda  
-              23: 'Annaba',        // Annaba
-              31: 'Oran',          // Oran
-              19: 'Setif',         // Setif
-              15: 'Tizi Ouzou',    // Tizi Ouzou
-              27: 'Mostaganem',    // Mostaganem
-              17: 'Djelfa',        // Djelfa
-              6: 'Bejaia'          // Bejaia
-            };
-            finalCommune = wilayaCommunes[cityAsNumber] || `Wilaya${cityAsNumber}`;
-            console.log(`🔢 Mapped numeric city "${orderData.customer_city}" to wilaya_id: ${finalWilayaId}, commune: ${finalCommune}`);
-          }
-        }
-        
-        // Final fallback to Algiers if still invalid
-        if (finalWilayaId > 58 || finalWilayaId < 1) {
-          finalWilayaId = 16; // Default to Algiers
-          finalCommune = 'Alger Centre';
-          console.log(`🏛️ Fallback to Algiers: wilaya_id: ${finalWilayaId}, commune: ${finalCommune}`);
         }
       }
       
-      // Validate and fix commune name for Ecotrack using EcoTrack API + comprehensive mapping
-      finalCommune = await this.validateCommuneWithAPI(finalCommune, finalWilayaId);
+      // Use wilaya name directly without complex validation
+      finalCommune = this.getWilayaNameById(finalWilayaId);
       
       console.log(`  - Final wilaya_id: ${finalWilayaId}`);
-      console.log(`  - Final commune: "${finalCommune}"`);
+      console.log(`  - Final commune: "${finalCommune}" (using wilaya name)`);
       console.log(`  - Original commune from order: "${orderData.commune}"`);
       
       // Determine which montant to use - prioritize frontend calculation
@@ -574,7 +635,9 @@ class EcotrackService {
         delivery_price: orderData.delivery_price,
         total_amount: orderData.total_amount,
         calculated_montant: finalMontant,
-        source: montantSource
+        source: montantSource,
+        wilaya_id: finalWilayaId,
+        wilaya_note: this.getWilayaDeliveryNote(finalWilayaId)
       });
       
       // Determine stop_desk value based ONLY on delivery type
@@ -605,6 +668,14 @@ class EcotrackService {
       
       console.log(`💰 Using montant: ${finalMontant} DA (Source: ${montantSource})`);
       
+      // Get station code for stop_desk delivery
+      let stationInfo = null;
+      
+      if (stopDesk === 1) {
+        stationInfo = await this.getValidStationCodeForWilaya(orderData, finalWilayaId);
+        console.log(`🚉 Using station code for wilaya ${finalWilayaId}: ${stationInfo.station_code}`);
+      }
+
       const ecotrackOrderData = {
         api_token: selectedAccount.api_token, // Required - from selected account
         user_guid: selectedAccount.user_guid, // Required - from selected account
@@ -613,13 +684,12 @@ class EcotrackService {
         phone: (orderData.customer_phone?.replace(/\D/g, '') || '0555123456').substring(0, 10), // Required | digits between 9,10
         phone_2: orderData.customer_phone_2 ? orderData.customer_phone_2.replace(/\D/g, '').substring(0, 10) : undefined, // Optional | digits between 9,10
         adresse: orderData.customer_address || (() => {
+          // Always use the original customer location for the address, regardless of wilaya mapping
           const city = orderData.customer_city || 'Ville';
-          const commune = finalCommune || 'Commune';
-          // Avoid redundancy if city and commune are the same
-          return city.toLowerCase() === commune.toLowerCase() ? city : `${city}, ${commune}`;
-        })() || 'Adresse non spécifiée', // Required | max:255 - Use address or construct from city+commune
-        wilaya_id: finalWilayaId, // Required | integer between 1,48
-        commune: finalCommune, // Required | max:255
+          return city; // Keep the original customer city (e.g., "In Salah") in the address
+        })() || 'Adresse non spécifiée', // Required | max:255 - Keep original customer location in address
+        wilaya_id: finalWilayaId, // Use actual wilaya_id from database
+        commune: finalCommune, // Use actual commune name
         montant: finalMontant, // Required | numeric - Use frontend Total Final or backend calculation
         remarque: (() => {
           const quantityValue = orderData.quantity_ordered || orderData.quantity;
@@ -637,8 +707,9 @@ class EcotrackService {
         type_id: typeId, // Required | integer between 1,3 (1: Livraison, 2: Échange, 3: Pick up) - determined by delivery_type
         poids: Math.max(1, Math.floor(orderData.weight || productDetails.weight || 1)), // Required | integer (minimum 1)
         stop_desk: stopDesk, // Required | integer between 0,1 (0: à domicile, 1: stop desk) - determined from delivery_type or station_code
-        station_code: stopDesk === 1 ? (orderData.ecotrack_station_code || orderData.station_code || await this.getStationCodeForWilaya(finalWilayaId)) : undefined, // Required only for stop_desk = 1
+        station_code: stationInfo ? this.formatStationCode(stationInfo.station_code) : undefined, // Required only for stop_desk = 1
         stock: 0, // integer between 0,1 (0: Non, 1: Oui) - set to 0 since stock module is disabled
+        quantite: String(orderData.quantity || orderData.quantity_ordered || 1), // Required when stock = 1, must be string
         can_open: 0 // integer between 0,1 (0: Non, 1: Oui) - default to no
       };
 
@@ -648,7 +719,8 @@ class EcotrackService {
       });
       
       if (stopDesk === 1) {
-        console.log(`🚉 Stop desk delivery - Station selection: ${orderData.station_code ? 'Frontend provided' : 'API fetched'} - Using: ${ecotrackOrderData.station_code}`);
+        const formattedStationCode = this.formatStationCode(stationInfo.station_code);
+        console.log(`🚉 Stop desk delivery - Using station: ${formattedStationCode} (formatted from ${stationInfo.station_code}) for wilaya ${finalWilayaId}`);
       } else {
         console.log(`🏠 Home delivery - No station code required`);
       }
@@ -664,25 +736,107 @@ class EcotrackService {
       let createResponse;
       let attemptCount = 0;
       const maxAttempts = 4;
-      // Use actual communes from Tamanrasset wilaya based on database
-      const alternativeCommunes = ['In Salah', 'Tamanrasset', 'In Guezzam', 'Tin Zaouatine'];
-      // Alternative communes for Alger wilaya (16) - known working ones
-      const algerAlternatives = ['Alger', 'Alger Centre', 'Bab El Oued', 'El Harrach'];
+      // Alternative communes for different wilayas
+      const alternativeCommunes = {
+        // Major cities and common problematic wilayas
+        1: ['Adrar', 'Reggane', 'Zaouiet Kounta', 'Timimoun'], // Adrar
+        2: ['Chlef', 'Ténès', 'El Karimia', 'Boukadir'], // Chlef
+        3: ['Laghouat', 'Aflou', 'Ksar El Hirane', 'Hassi Delaa'], // Laghouat
+        4: ['Oum El Bouaghi', 'Ain Mlila', 'Ain Beida', 'Souk Naamane'], // Oum El Bouaghi
+        5: ['Batna', 'Barika', 'Arris', 'Ain Touta'], // Batna
+        6: ['Béjaïa', 'Akbou', 'Kherrata', 'Sidi Aich'], // Béjaïa
+        7: ['Biskra', 'Tolga', 'Sidi Okba', 'El Kantara'], // Biskra
+        8: ['Béchar', 'Beni Abbes', 'Kenadsa', 'Tabelbala'], // Béchar
+        9: ['Blida', 'Boufarik', 'Larbaa', 'Meftah'], // Blida
+        10: ['Bouira', 'Lakhdaria', 'M\'Chedallah', 'Sour El Ghozlane'], // Bouira
+        11: ['Tamanrasset', 'In Salah', 'In Guezzam', 'Tin Zaouatine'], // Tamanrasset
+        12: ['Tébessa', 'Cheria', 'El Aouinet', 'Bir El Ater'], // Tébessa
+        13: ['Tlemcen', 'Maghnia', 'Remchi', 'Sebdou'], // Tlemcen
+        14: ['Tiaret', 'Sougueur', 'Mahdia', 'Frenda'], // Tiaret
+        15: ['Tizi Ouzou', 'Azazga', 'Draa Ben Khedda', 'Tigzirt'], // Tizi Ouzou
+        16: ['Alger', 'Alger Centre', 'Bab El Oued', 'El Harrach', 'Draria', 'Rouiba'], // Alger
+        17: ['Djelfa', 'Messaad', 'Ain Oussera', 'Hassi Bahbah'], // Djelfa
+        18: ['Jijel', 'Ferraoun', 'El Milia', 'Taher'], // Jijel
+        19: ['Sétif', 'El Eulma', 'Ain Arnat', 'Bougaa'], // Sétif
+        20: ['Saïda', 'Ain El Hadjar', 'Ouled Brahim', 'Youb'], // Saïda
+        21: ['Skikda', 'Collo', 'Azzaba', 'El Hadaiek'], // Skikda
+        22: ['Sidi Bel Abbès', 'Télagh', 'Ben Badis', 'Tessala'], // Sidi Bel Abbès
+        23: ['Annaba', 'El Hadjar', 'Berrahal', 'Ain Berda'], // Annaba
+        24: ['Guelma', 'Bouchegouf', 'Heliopolis', 'Hammam Debagh'], // Guelma
+        25: ['Constantine', 'Ali Mendjeli', 'Didouche Mourad', 'El Khroub'], // Constantine
+        26: ['Médéa', 'Berrouaghia', 'Ksar El Boukhari', 'Tablat'], // Médéa
+        27: ['Mostaganem', 'Relizane', 'Ain Nouissy', 'Stidia'], // Mostaganem
+        28: ['MSila', 'M\'Sila', 'Msila', 'M Sila', 'Boussaada'], // M'Sila - WORKING: MSila is correct
+        29: ['Mascara', 'Sig', 'Mohammadia', 'Tighennif'], // Mascara
+        30: ['Ouargla', 'Hassi Messaoud', 'Touggourt', 'Nezla'], // Ouargla
+        31: ['Oran', 'Es Senia', 'Bir El Djir', 'Arzew'], // Oran
+        32: ['El Bayadh', 'Brézina', 'Bogtob', 'El Abiodh Sidi Cheikh'], // El Bayadh
+        33: ['Illizi', 'In Amenas', 'Deb Deb', 'Bordj Omar Driss'], // Illizi
+        34: ['Bordj Bou Arreridj', 'Ras El Oued', 'El Anseur', 'Bordj Ghdir'], // Bordj Bou Arreridj
+        35: ['Boumerdès', 'Naciria', 'Khemis El Khechna', 'Boudouaou'], // Boumerdès
+        36: ['El Tarf', 'El Kala', 'Bouhadjar', 'Ben M\'Hidi'], // El Tarf
+        37: ['Tindouf'], // Tindouf
+        38: ['Tissemsilt', 'Theniet El Had', 'Bordj Bou Naama', 'Lazharia'], // Tissemsilt
+        39: ['El Oued', 'Robbah', 'Guemar', 'Taghzout'], // El Oued
+        40: ['Khenchela', 'Chechar', 'Kais', 'Baghai'], // Khenchela
+        41: ['Souk Ahras', 'Sedrata', 'M\'Daourouche', 'Bir Bouhouche'], // Souk Ahras
+        42: ['Tipaza', 'Kolea', 'Cherchell', 'Menaceur'], // Tipaza
+        43: ['Mila', 'Ferdjioua', 'Chelghoum Laid', 'Rouached'], // Mila
+        44: ['Aïn Defla', 'Khemis Miliana', 'El Attaf', 'Djelida'], // Aïn Defla
+        45: ['Naâma', 'Mecheria', 'Ain Sefra', 'Asla'], // Naâma
+        46: ['Aïn Témouchent', 'Hammam Bouhadjar', 'Beni Saf', 'El Malah'], // Aïn Témouchent
+        47: ['Ghardaïa', 'El Meniaa', 'Berriane', 'Metlili'], // Ghardaïa
+        48: ['Relizane', 'Mazouna', 'Oued Rhiou', 'Yellel'], // Relizane
+        49: ['Timimoun', 'Adrar', 'Aougrout', 'Charouine'], // Timimoun
+        50: ['Bordj Badji Mokhtar', 'Timiaouine'], // Bordj Badji Mokhtar
+        51: ['Ouled Djellal', 'Sidi Khaled', 'Besbes'], // Ouled Djellal
+        52: ['Béni Abbès', 'Tabelbala', 'El Ouata'], // Béni Abbès
+        53: ['In Salah', 'Ain Salah', 'Insalah', 'Centre-Ville', 'In-Salah'], // In Salah wilaya
+        54: ['Djanet', 'Illizi'], // Djanet
+        55: ['Touggourt', 'Megarine', 'Taibet', 'Nezla'], // Touggourt
+        56: ['El M\'Ghair', 'El Mghair', 'Still', 'Djamaa'], // El M'Ghair
+        57: ['El Meniaa', 'Hassi Gara', 'Hassi Fehal'], // El Meniaa
+        58: ['El Meniaa', 'In Salah'] // El Meniaa (alternative)
+      };
       
       // Try multiple commune name formats for problematic locations
       while (attemptCount < maxAttempts) {
         attemptCount++;
         
-        // For Tamanrasset, try alternative spellings
-        if (attemptCount > 1 && finalWilayaId === 11) {
-          ecotrackOrderData.commune = alternativeCommunes[attemptCount - 1] || ecotrackOrderData.commune;
-          console.log(`🔄 Attempt ${attemptCount}: Trying commune name: ${ecotrackOrderData.commune}`);
-        }
-        
-        // For Alger wilaya, try alternative commune names
-        if (attemptCount > 1 && finalWilayaId === 16) {
-          ecotrackOrderData.commune = algerAlternatives[attemptCount - 1] || 'Alger';
-          console.log(`🔄 Attempt ${attemptCount}: Trying Alger commune: ${ecotrackOrderData.commune}`);
+        // Use finalWilayaId for alternative communes
+        if (attemptCount > 1) {
+          const wilayaNames = {
+            1: 'Adrar', 2: 'Chlef', 3: 'Laghouat', 4: 'Oum El Bouaghi', 5: 'Batna',
+            6: 'Béjaïa', 7: 'Biskra', 8: 'Béchar', 9: 'Blida', 10: 'Bouira',
+            11: 'Tamanrasset', 12: 'Tébessa', 13: 'Tlemcen', 14: 'Tiaret', 15: 'Tizi Ouzou',
+            16: 'Alger', 17: 'Djelfa', 18: 'Jijel', 19: 'Sétif', 20: 'Saïda',
+            21: 'Skikda', 22: 'Sidi Bel Abbès', 23: 'Annaba', 24: 'Guelma', 25: 'Constantine',
+            26: 'Médéa', 27: 'Mostaganem', 28: 'MSila', 29: 'Mascara', 30: 'Ouargla',
+            31: 'Oran', 32: 'El Bayadh', 33: 'Illizi', 34: 'Bordj Bou Arreridj', 35: 'Boumerdès',
+            36: 'El Tarf', 37: 'Tindouf', 38: 'Tissemsilt', 39: 'El Oued', 40: 'Khenchela',
+            41: 'Souk Ahras', 42: 'Tipaza', 43: 'Mila', 44: 'Aïn Defla', 45: 'Naama',
+            46: 'Aïn Témouchent', 47: 'Ghardaïa', 48: 'Relizane', 49: 'Timimoun',
+            50: 'Bordj Badji Mokhtar', 51: 'Ouled Djellal', 52: 'Béni Abbès', 53: 'In Salah',
+            54: 'Djanet', 55: 'Touggourt', 56: 'El M\'Ghair', 57: 'El Meniaa'
+          };
+          
+          // Build alternatives: specific alternatives + wilaya name as final fallback
+          let alternatives = [];
+          if (alternativeCommunes[finalWilayaId]) {
+            alternatives = [...alternativeCommunes[finalWilayaId]];
+          }
+          // Always add wilaya name as final fallback if not already included
+          if (wilayaNames[finalWilayaId] && !alternatives.includes(wilayaNames[finalWilayaId])) {
+            alternatives.push(wilayaNames[finalWilayaId]);
+          }
+          
+          if (alternatives.length > 0) {
+            const alternativeIndex = attemptCount - 2;
+            if (alternativeIndex < alternatives.length) {
+              ecotrackOrderData.commune = alternatives[alternativeIndex];
+              console.log(`🔄 Attempt ${attemptCount}: Trying commune "${ecotrackOrderData.commune}" for wilaya ${finalWilayaId} (fallback ${alternativeIndex + 1}/${alternatives.length})`);
+            }
+          }
         }
         
         try {
@@ -707,33 +861,7 @@ class EcotrackService {
             if (error.response?.data?.errors?.commune || 
                 (error.response?.data?.message && error.response.data.message.toLowerCase().includes('commune'))) {
               console.log(`🔄 Commune validation failed, trying alternative name...`);
-              
-              // Try fallback for specific wilayas
-              if (finalWilayaId === 11) {
-                continue; // Tamanrasset alternatives
-              } else if (finalWilayaId === 16) {
-                continue; // Alger alternatives
-              } else {
-                // For other wilayas, try using the wilaya name as commune
-                const wilayaNames = {
-                  1: 'Adrar', 2: 'Chlef', 3: 'Laghouat', 4: 'Oum El Bouaghi', 5: 'Batna',
-                  6: 'Béjaïa', 7: 'Biskra', 8: 'Béchar', 9: 'Blida', 10: 'Bouira',
-                  11: 'Tamanrasset', 12: 'Tébessa', 13: 'Tlemcen', 14: 'Tiaret', 15: 'Tizi Ouzou',
-                  16: 'Alger', 17: 'Djelfa', 18: 'Jijel', 19: 'Sétif', 20: 'Saïda',
-                  21: 'Skikda', 22: 'Sidi Bel Abbès', 23: 'Annaba', 24: 'Guelma', 25: 'Constantine',
-                  26: 'Médéa', 27: 'Mostaganem', 28: 'MSila', 29: 'Mascara', 30: 'Ouargla',
-                  31: 'Oran', 32: 'El Bayadh', 33: 'Illizi', 34: 'Bordj Bou Arreridj', 35: 'Boumerdès',
-                  36: 'El Tarf', 37: 'Tindouf', 38: 'Tissemsilt', 39: 'El Oued', 40: 'Khenchela',
-                  41: 'Souk Ahras', 42: 'Tipaza', 43: 'Mila', 44: 'Aïn Defla', 45: 'Naama',
-                  46: 'Aïn Témouchent', 47: 'Ghardaïa', 48: 'Relizane'
-                };
-                
-                if (wilayaNames[finalWilayaId]) {
-                  ecotrackOrderData.commune = wilayaNames[finalWilayaId];
-                  console.log(`🔄 Trying wilaya name as commune: ${ecotrackOrderData.commune}`);
-                  continue;
-                }
-              }
+              continue; // Try next alternative commune
             }
           }
           
@@ -1052,63 +1180,6 @@ class EcotrackService {
    * @param {string} cityName - City name
    * @returns {Object} - {wilaya_id, commune}
    */
-  mapCityToWilayaId(cityName) {
-    const cityMappings = {
-      'adrar': { wilaya_id: 1, commune: 'Adrar' },
-      'chlef': { wilaya_id: 2, commune: 'Chlef' },
-      'laghouat': { wilaya_id: 3, commune: 'Laghouat' },
-      'oum-el-bouaghi': { wilaya_id: 4, commune: 'Oum El Bouaghi' },
-      'batna': { wilaya_id: 5, commune: 'Batna' },
-      'bejaia': { wilaya_id: 6, commune: 'Bejaia' },
-      'biskra': { wilaya_id: 7, commune: 'Biskra' },
-      'bechar': { wilaya_id: 8, commune: 'Bechar' },
-      'blida': { wilaya_id: 9, commune: 'Blida' },
-      'bouira': { wilaya_id: 10, commune: 'Bouira' },
-      'tamanrasset': { wilaya_id: 11, commune: 'In Salah' }, // Use In Salah instead of Tamanrasset
-      'tebessa': { wilaya_id: 12, commune: 'Tebessa' },
-      'tlemcen': { wilaya_id: 13, commune: 'Tlemcen' },
-      'tiaret': { wilaya_id: 14, commune: 'Tiaret' },
-      'tizi-ouzou': { wilaya_id: 15, commune: 'Tizi Ouzou' },
-      'alger': { wilaya_id: 16, commune: 'Alger Centre' },
-      'algiers': { wilaya_id: 16, commune: 'Alger Centre' },
-      'djelfa': { wilaya_id: 17, commune: 'Djelfa' },
-      'jijel': { wilaya_id: 18, commune: 'Jijel' },
-      'setif': { wilaya_id: 19, commune: 'Setif' },
-      'saida': { wilaya_id: 20, commune: 'Saida' },
-      'skikda': { wilaya_id: 21, commune: 'Skikda' },
-      'sidi-bel-abbes': { wilaya_id: 22, commune: 'Sidi Bel Abbes' },
-      'annaba': { wilaya_id: 23, commune: 'Annaba' },
-      'guelma': { wilaya_id: 24, commune: 'Guelma' },
-      'constantine': { wilaya_id: 25, commune: 'Constantine' },
-      'medea': { wilaya_id: 26, commune: 'Medea' },
-      'mostaganem': { wilaya_id: 27, commune: 'Mostaganem' },
-      'msila': { wilaya_id: 28, commune: 'M\'Sila' },
-      'mascara': { wilaya_id: 29, commune: 'Mascara' },
-      'ouargla': { wilaya_id: 30, commune: 'Ouargla' },
-      'oran': { wilaya_id: 31, commune: 'Oran' },
-      'el-bayadh': { wilaya_id: 32, commune: 'El Bayadh' },
-      'illizi': { wilaya_id: 33, commune: 'Illizi' },
-      'bordj-bou-arreridj': { wilaya_id: 34, commune: 'Bordj Bou Arreridj' },
-      'boumerdes': { wilaya_id: 35, commune: 'Boumerdes' },
-      'el-tarf': { wilaya_id: 36, commune: 'El Tarf' },
-      'tindouf': { wilaya_id: 37, commune: 'Tindouf' },
-      'tissemsilt': { wilaya_id: 38, commune: 'Tissemsilt' },
-      'el-oued': { wilaya_id: 39, commune: 'El Oued' },
-      'khenchela': { wilaya_id: 40, commune: 'Khenchela' },
-      'souk-ahras': { wilaya_id: 41, commune: 'Souk Ahras' },
-      'tipaza': { wilaya_id: 42, commune: 'Tipaza' },
-      'mila': { wilaya_id: 43, commune: 'Mila' },
-      'ain-defla': { wilaya_id: 44, commune: 'Ain Defla' },
-      'naama': { wilaya_id: 45, commune: 'Naama' },
-      'ain-temouchent': { wilaya_id: 46, commune: 'Ain Temouchent' },
-      'ghardaia': { wilaya_id: 47, commune: 'Ghardaia' },
-      'relizane': { wilaya_id: 48, commune: 'Relizane' }
-    };
-
-    const normalizedCity = cityName.toLowerCase().trim().replace(/\s+/g, '-');
-    return cityMappings[normalizedCity] || { wilaya_id: 16, commune: 'Alger Centre' }; // Default to Algiers
-  }
-
   /**
    * Check if Ecotrack service is available (basic connectivity test)
    * @returns {Promise<boolean>} - Service availability
@@ -1444,6 +1515,68 @@ class EcotrackService {
   }
 
   /**
+   * Get and validate station code for a wilaya
+   * @param {Object} orderData - Order data that may contain station_code
+   * @param {number} wilayaId - Target wilaya ID
+   * @returns {Promise<Object>} - Object with station_code and corrected_wilaya_id
+   */
+  async getValidStationCodeForWilaya(orderData, wilayaId) {
+    try {
+      // First try to get station from actual EcoTrack stations API
+      const stationInfo = await this.getStationByWilayaId(wilayaId);
+      
+      if (stationInfo) {
+        console.log(`✅ Using EcoTrack station for wilaya ${wilayaId}: ${stationInfo.station_code} (${stationInfo.name})`);
+        return stationInfo;
+      }
+      
+      // Fallback to existing logic if API doesn't have the station
+      // Check if frontend provided station codes
+      const providedStationCode = orderData.ecotrack_station_code || orderData.station_code;
+      
+      if (providedStationCode) {
+        // Extract wilaya ID from station code (first 2 digits)
+        const stationCodeMatch = providedStationCode.match(/^(\d{1,2})/);
+        if (stationCodeMatch) {
+          const stationWilayaId = parseInt(stationCodeMatch[1]);
+          
+          if (stationWilayaId === wilayaId) {
+            // Station code matches wilaya - use it
+            console.log(`✅ Station code ${providedStationCode} matches wilaya ${wilayaId} - using as provided`);
+            return {
+              station_code: this.formatStationCode(providedStationCode),
+              corrected_wilaya_id: wilayaId
+            };
+          } else {
+            // Station code doesn't match - log warning and fetch correct one
+            console.warn(`⚠️ Station code mismatch: ${providedStationCode} (wilaya ${stationWilayaId}) != wilaya ${wilayaId}. Fetching correct station code...`);
+          }
+        } else {
+          console.warn(`⚠️ Invalid station code format: ${providedStationCode}. Fetching correct station code for wilaya ${wilayaId}...`);
+        }
+      }
+      
+      // Get correct station code for the wilaya
+      const correctStationCode = await this.getStationCodeForWilaya(wilayaId);
+      console.log(`🔧 Using station code for wilaya ${wilayaId}: ${correctStationCode}`);
+      
+      return {
+        station_code: this.formatStationCode(correctStationCode),
+        corrected_wilaya_id: wilayaId
+      };
+      
+    } catch (error) {
+      console.error(`❌ Error validating station code for wilaya ${wilayaId}:`, error.message);
+      // Fallback to the original method
+      const stationCode = await this.getStationCodeForWilaya(wilayaId);
+      return {
+        station_code: stationCode,
+        corrected_wilaya_id: wilayaId
+      };
+    }
+  }
+
+  /**
    * Get station code for a given wilaya (required when stop_desk = 1)
    * Fetches from EcoTrack API and caches the result
    * @param {number} wilayaId - Wilaya ID
@@ -1454,22 +1587,21 @@ class EcotrackService {
       // Get fresh station codes from API
       const stations = await this.fetchStationCodes();
       
-      // Find station for the given wilaya
+      // Find station for the wilaya
       const station = stations.find(s => {
         // Match by wilaya ID in the code (format like "01A", "02A", etc.)
-        const stationWilayaId = parseInt(s.code.substring(0, 2));
+        const stationWilayaId = parseInt(s.id.substring(0, 2));
         return stationWilayaId === wilayaId;
       });
       
       if (station) {
-        console.log(`🚉 Found station for wilaya ${wilayaId}: ${station.code} (${station.name})`);
-        return station.code;
+        console.log(`🚉 Found station for wilaya ${wilayaId}: ${station.id} (${station.name}) -> code: ${station.code}`);
+        return station.code; // Return the code field (e.g., "5B") instead of id field (e.g., "05B")
       }
       
-      // Fallback to Alger if not found
-      console.warn(`⚠️ No station found for wilaya ${wilayaId}, using Alger fallback`);
-      const algerStation = stations.find(s => s.code.startsWith('16'));
-      return algerStation ? algerStation.code : '16A';
+      // Log warning but return null instead of fallback to preserve original location
+      console.warn(`⚠️ No station found for wilaya ${wilayaId}`);
+      return null;
       
     } catch (error) {
       console.error(`❌ Error getting station code for wilaya ${wilayaId}:`, error.message);
@@ -1607,25 +1739,83 @@ class EcotrackService {
    * @returns {string} - Fallback station code
    */
   getFallbackStationCode(wilayaId) {
-    // Simplified fallback mapping based on common patterns
+    // Enhanced fallback mapping based on the delivery pricing table
     const fallbackCodes = {
+      // Major cities with confirmed stations
       16: '16A', // Alger
       31: '31A', // Oran
       25: '25A', // Constantine
       23: '23A', // Annaba
       19: '19A', // Setif
       15: '15A', // Tizi Ouzou
-      6: '06A',  // Bejaia
-      9: '09A',  // Blida
+      6: '6A',   // Bejaia
+      9: '9A',   // Blida
       21: '21A', // Skikda
-      27: '27A'  // Mostaganem
+      27: '27A', // Mostaganem
+      
+      // Additional wilayas from pricing table
+      1: '1A',   // Adrar
+      2: '2A',   // Chlef
+      3: '3A',   // Laghouat
+      4: '4A',   // Oum El Bouaghi
+      5: '5A',   // Batna
+      7: '7A',   // Biskra
+      8: '8A',   // Béchar
+      10: '10A', // Bouira
+      11: '11A', // Tamanrasset
+      12: '12A', // Tébessa
+      13: '13A', // Tlemcen
+      14: '14A', // Tiaret
+      17: '17A', // Djelfa
+      18: '18A', // Jijel
+      20: '20A', // Saïda
+      22: '22A', // Sidi Bel Abbès
+      24: '24A', // Guelma
+      26: '26A', // Médéa
+      28: '28A', // M'Sila
+      29: '29A', // Mascara
+      30: '30A', // Ouargla
+      32: '32A', // El Bayadh
+      33: '33A', // Illizi
+      34: '34A', // Bordj Bou Arreridj
+      35: '35A', // Boumerdès
+      36: '36A', // El Tarf
+      37: '37A', // Tindouf
+      38: '38A', // Tissemsilt
+      39: '39A', // El Oued
+      40: '40A', // Khenchela
+      41: '41A', // Souk Ahras
+      42: '42A', // Tipaza
+      43: '43A', // Mila
+      44: '44A', // Aïn Defla
+      45: '45A', // Naâma
+      46: '46A', // Aïn Témouchent
+      47: '47A', // Ghardaïa
+      48: '48A', // Relizane
+      49: '49A', // Timimoun
+      51: '51A', // Ouled Djellal
+      53: '53A', // In Salah
+      55: '55A', // Touggourt
+      58: '58A', // El Meniaa
+      52: '52A', // Beni Abbes
+      53: '53A', // In Salah
+      54: '54A', // In Guezzam (reserved)
+      56: '56A', // Djanet (reserved)
+      57: '57A', // El M'Ghair
+      58: '58A'  // El Meniaa
     };
     
-    // Format wilaya ID with leading zero if needed
-    const formattedWilayaId = wilayaId.toString().padStart(2, '0');
-    const fallbackCode = fallbackCodes[wilayaId] || `${formattedWilayaId}A`;
+    // Get the fallback code
+    let fallbackCode = fallbackCodes[wilayaId];
     
-    console.log(`� Using fallback station code for wilaya ${wilayaId}: ${fallbackCode}`);
+    // If no specific mapping, format with leading zero
+    if (!fallbackCode) {
+      const formattedWilayaId = wilayaId.toString().padStart(2, '0');
+      fallbackCode = `${formattedWilayaId}A`;
+    }
+    
+    console.log(`📍 Using fallback station code for wilaya ${wilayaId}: ${fallbackCode}`);
+    
     return fallbackCode;
   }
 
@@ -1698,143 +1888,52 @@ class EcotrackService {
   // Enhanced commune validation using EcoTrack API data
   async validateCommuneWithAPI(commune, wilayaId) {
     try {
-      console.log(`🔍 Validating commune "${commune}" for wilaya ${wilayaId} with EcoTrack API...`);
+      console.log(`🔍 Validating commune "${commune}" for wilaya ${wilayaId} using EcoTrack API...`);
       
-      // Special handling for Alger province (wilaya_id 16)
-      if (wilayaId === 16 || wilayaId === '16') {
-        console.log(`🏛️ Alger wilaya detected, using known working communes...`);
-        
-        // List of known working Alger communes based on EcoTrack's database
-        const algerCommunes = [
-          'Alger Centre',
-          'Sidi M\'Hamed', 
-          'El Madania',
-          'Bab El Oued',
-          'Bologhine',
-          'Casbah',
-          'Oued Koriche',
-          'Bir Mourad Rais',
-          'El Biar',
-          'Bouzareah',
-          'Birkhadem',
-          'El Harrach',
-          'Baraki',
-          'Oued Smar',
-          'Bourouba',
-          'Hussein Dey',
-          'Kouba',
-          'Bachdjerrah',
-          'Dar El Beida',
-          'Bab Ezzouar',
-          'Ben Aknoun',
-          'Dely Ibrahim',
-          'Hammamet',
-          'Rais Hamidou',
-          'Djasr Kasentina',
-          'El Mouradia',
-          'Hydra',
-          'Mohammadia',
-          'Bordj El Kiffan',
-          'El Magharia',
-          'Beni Messous',
-          'Les Eucalyptus',
-          'Birtouta',
-          'Tessala El Merdja',
-          'Ouled Chebel',
-          'Sidi Moussa',
-          'Ain Taya',
-          'Bordj El Bahri',
-          'El Marsa',
-          'H Dey',
-          'Reghaïa',
-          'Rouiba',
-          'Staoueli',
-          'Zeralda',
-          'Ain Benian',
-          'Cheraga',
-          'Douera',
-          'Ouled Fayet',
-          'El Achour',
-          'Draria',
-          'Debbah'
-        ];
-        
-        // Try exact match first
-        let exactMatch = algerCommunes.find(c => 
-          c.toLowerCase() === commune.toLowerCase()
-        );
-        if (exactMatch) {
-          console.log(`✅ Found exact Alger commune: "${exactMatch}"`);
-          return exactMatch;
-        }
-        
-        // Try partial match
-        let partialMatch = algerCommunes.find(c =>
-          c.toLowerCase().includes(commune.toLowerCase()) ||
-          commune.toLowerCase().includes(c.toLowerCase())
-        );
-        if (partialMatch) {
-          console.log(`✅ Found partial Alger commune match: "${partialMatch}"`);
-          return partialMatch;
-        }
-        
-        // Special handling for Bab Ezzouar area - use Alger as fallback
-        if (commune.toLowerCase().includes('bab ezzouar') || 
-            commune.toLowerCase().includes('bab_ezzouar')) {
-          console.log(`🎯 Bab Ezzouar detected, using "Alger" as fallback due to API validation issues`);
-          return 'Alger'; // Use Alger instead of exact name due to EcoTrack validation issues
-        }
-        
-        // Default to Alger Centre for unknown Alger communes
-        console.log(`🏛️ Unknown Alger commune, defaulting to "Alger Centre"`);
-        return 'Alger Centre';
+      // Fetch communes for this specific wilaya from EcoTrack API
+      const communes = await this.fetchCommunesFromEcoTrack(wilayaId);
+      
+      if (communes.length === 0) {
+        console.warn(`⚠️ No communes found in EcoTrack API for wilaya ${wilayaId}, using original: "${commune}"`);
+        return commune;
       }
       
-      // For other wilayas, try API fetch
-      const communesData = await this.fetchValidCommunes();
+      // Try exact match first (case insensitive)
+      let matchedCommune = communes.find(c => 
+        c.nom.toLowerCase() === commune.toLowerCase()
+      );
       
-      if (communesData) {
-        // Try to find the commune in the API response
-        // The structure might be different, so we'll check various possible formats
-        let validCommunes = [];
-        
-        if (Array.isArray(communesData)) {
-          validCommunes = communesData;
-        } else if (communesData.data && Array.isArray(communesData.data)) {
-          validCommunes = communesData.data;
-        } else if (typeof communesData === 'object') {
-          // Extract communes from object structure
-          validCommunes = Object.values(communesData).flat();
-        }
-        
-        // Look for matching commune in the API data
-        const communeLower = commune.toLowerCase();
-        const match = validCommunes.find(item => {
-          if (typeof item === 'string') {
-            return item.toLowerCase() === communeLower;
-          } else if (item && typeof item === 'object') {
-            return (
-              (item.name && item.name.toLowerCase() === communeLower) ||
-              (item.commune && item.commune.toLowerCase() === communeLower) ||
-              (item.label && item.label.toLowerCase() === communeLower)
-            );
-          }
-          return false;
-        });
-        
-        if (match) {
-          const matchedName = typeof match === 'string' ? match : (match.name || match.commune || match.label);
-          console.log(`✅ Found valid commune in API: "${matchedName}"`);
-          return matchedName;
-        }
+      if (matchedCommune) {
+        console.log(`✅ Exact match found: "${matchedCommune.nom}" for "${commune}"`);
+        return matchedCommune.nom;
       }
       
-      // Fallback to existing logic if API doesn't work
-      return this.validateAndFixCommune(commune, wilayaId);
+      // Try partial match (contains)
+      matchedCommune = communes.find(c => 
+        c.nom.toLowerCase().includes(commune.toLowerCase()) ||
+        commune.toLowerCase().includes(c.nom.toLowerCase())
+      );
+      
+      if (matchedCommune) {
+        console.log(`🔍 Partial match found: "${matchedCommune.nom}" for "${commune}"`);
+        return matchedCommune.nom;
+      }
+      
+      // If no match found, use the first commune from EcoTrack API as fallback
+      if (communes.length > 0) {
+        const fallbackCommune = communes[0];
+        console.log(`🔄 No match found, using first available commune: "${fallbackCommune.nom}" for "${commune}"`);
+        return fallbackCommune.nom;
+      }
+      
+      // Final fallback: return original commune name
+      console.warn(`⚠️ No communes available, using original: "${commune}"`);
+      return commune;
+      
     } catch (error) {
-      console.error('❌ Error in API commune validation:', error.message);
-      // Fallback to existing logic
-      return this.validateAndFixCommune(commune, wilayaId);
+      console.error(`❌ Error validating commune "${commune}" for wilaya ${wilayaId}:`, error.message);
+      // Fallback to original commune name
+      return commune;
     }
   }
 
@@ -1849,8 +1948,14 @@ class EcotrackService {
     const communeMapping = {
       'Douira': 'Alger Centre',
       'douira': 'Alger Centre',
-      'Tamanrasset': 'In Salah',
-      'تمنراست': 'In Salah',
+      'Tamanrasset': 'Ain Salah',
+      'تمنراست': 'Ain Salah',
+      'In Salah': 'Ain Salah',
+      'in salah': 'Ain Salah',
+      'In salah': 'Ain Salah',
+      'IN SALAH': 'Ain Salah',
+      'insalah': 'Ain Salah',
+      'Insalah': 'Ain Salah',
       'Bir Mourad Rais': 'Bir Mourad Rais',
       'El Harrach': 'El Harrach',
       'Rouiba': 'Rouiba',
@@ -1868,7 +1973,12 @@ class EcotrackService {
       'Oum El Bouaghi': 'Oum el bouaghi',
       'Oum el Bouaghi': 'Oum el bouaghi',
       'Oum el bouaghi': 'Oum el bouaghi',
-      'أم البواقي': 'Oum el bouaghi'
+      'أم البواقي': 'Oum el bouaghi',
+      // Tébessa specific mappings
+      'Bir Mokkadem': 'Tébessa',
+      'Bir mokkadem': 'Tébessa',
+      'bir mokkadem': 'Tébessa',
+      'BIR MOKKADEM': 'Tébessa'
     };
     
     // Direct mapping first
@@ -1877,7 +1987,7 @@ class EcotrackService {
       return communeMapping[commune];
     }
     
-    // Special handling for Alger wilaya (16) - use known working communes
+    // Special handling for common problematic wilayas
     if (wilayaId === 16) {
       const algerCommunes = [
         'Alger Centre', 'Bab El Oued', 'El Harrach', 'Bir Mourad Rais', 
@@ -1895,6 +2005,26 @@ class EcotrackService {
       const alternativeCommunes = ['Alger', 'Bab el Oued', 'El Harrach', 'Rouiba', 'Alger Centre', 'Kouba'];
       for (const altCommune of alternativeCommunes) {
         console.log(`🔄 Trying alternative commune: "${altCommune}" for wilaya 16`);
+        return altCommune;
+      }
+    }
+    
+    // Special handling for Tébessa wilaya (12) - common problematic communes
+    if (wilayaId === 12) {
+      const tebesssaCommunes = [
+        'Tébessa', 'Tebessa', 'Bir El Ater', 'Cheria', 'Negrine', 'El Houidjbet'
+      ];
+      
+      // If the commune is Bir Mokkadem or similar, use Tébessa as fallback
+      const lowerCommune = commune.toLowerCase();
+      if (lowerCommune.includes('bir') && lowerCommune.includes('mokkadem')) {
+        console.log(`🏛️ Bir Mokkadem detected, using Tébessa as fallback for EcoTrack compatibility`);
+        return 'Tébessa';
+      }
+      
+      // Try some alternative basic commune names that might work
+      for (const altCommune of tebesssaCommunes) {
+        console.log(`🔄 Trying alternative commune: "${altCommune}" for wilaya 12`);
         return altCommune;
       }
     }
@@ -1937,8 +2067,8 @@ class EcotrackService {
       8: 'Bechar',
       9: 'Blida',
       10: 'Bouira',
-      11: 'In Salah', // Tamanrasset -> In Salah
-      12: 'Tebessa',
+      11: 'Ain Salah', // Tamanrasset -> Ain Salah
+      12: 'Tébessa',
       13: 'Tlemcen',
       14: 'Tiaret',
       15: 'Tizi Ouzou',
@@ -1974,10 +2104,16 @@ class EcotrackService {
       45: 'Naama',
       46: 'Ain Temouchent',
       47: 'Ghardaia',
-      48: 'Relizane'
+      48: 'Relizane',
+      49: 'Timimoun',
+      51: 'Ouled Djellal',
+      52: 'Beni Abbes',
+      53: 'In Salah',
+      55: 'Touggourt',
+      58: 'El Meniaa'
     };
     
-    return defaultCommunes[wilayaId] || 'Alger Centre';
+    return defaultCommunes[wilayaId] || null; // Return null instead of defaulting to Alger Centre
   }
 
   /**
@@ -2045,6 +2181,323 @@ class EcotrackService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Get delivery note for specific wilaya based on pricing table
+   * @param {number} wilayaId - Wilaya ID
+   * @returns {string} - Delivery note
+   */
+  getWilayaDeliveryNote(wilayaId) {
+      // Special cases based on the pricing table and database mapping corrections
+      const specialCases = {
+        52: 'Limited delivery (redirected to Béchar)',
+        56: 'El M\'Ghair - Limited delivery (redirected to El Oued)',
+        57: 'Data correction: El M\'Ghair orders incorrectly mapped (redirected to El Oued)',
+      };    return specialCases[wilayaId] || 'Standard delivery';
+  }
+  /**
+   * Fetch EcoTrack stations from local API
+   */
+  async fetchEcoTrackStations() {
+    try {
+      const response = await axios.get('http://localhost:3000/api/ecotrack/stations');
+      if (response.data && response.data.success && response.data.data) {
+        return response.data.data;
+      }
+      console.warn('⚠️ Failed to fetch EcoTrack stations from local API');
+      return [];
+    } catch (error) {
+      console.error('❌ Error fetching EcoTrack stations:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Get station info by wilaya ID using local stations API
+   */
+  async getStationByWilayaId(wilayaId) {
+    const stations = await this.fetchEcoTrackStations();
+    
+    // Find station that matches wilaya ID (station code pattern: wilayaId + 'A')
+    const expectedCode = `${wilayaId}A`;
+    const station = stations.find(s => s.code === expectedCode || s.id === expectedCode);
+    
+    if (station) {
+      console.log(`🗺️ Found EcoTrack station for wilaya ${wilayaId}:`, {
+        code: station.code,
+        name: station.name,
+        address: station.address
+      });
+      return {
+        station_code: station.code,
+        name: station.name,
+        address: station.address
+      };
+    }
+    
+    console.warn(`⚠️ No EcoTrack station found for wilaya ${wilayaId}`);
+    return null;
+  }
+
+  /**
+   * Fetch communes from EcoTrack API
+   * @param {number} wilayaId - Optional wilaya ID to filter communes
+   * @returns {Promise<Array>} - Array of communes with their names and postal codes
+   */
+  async fetchCommunesFromEcoTrack(wilayaId = null) {
+    try {
+      console.log(`🌍 Starting fetchCommunesFromEcoTrack${wilayaId ? ` for wilaya ${wilayaId}` : ' (all wilayas)'}...`);
+      
+      // Ensure we have credentials
+      await this.ensureConfigLoaded();
+      
+      // Use any available account for fetching communes
+      let apiToken = this.apiToken;
+      let userGuid = this.userGuid;
+      
+      console.log('🔑 Checking credentials:', {
+        globalApiToken: !!this.apiToken,
+        globalUserGuid: !!this.userGuid
+      });
+      
+      // Try to get credentials from default account if global config not available
+      if (!apiToken || !userGuid) {
+        console.log('🔄 Global credentials not available, trying default account...');
+        const defaultAccount = await this.getDefaultAccount();
+        if (defaultAccount) {
+          apiToken = defaultAccount.api_token;
+          userGuid = defaultAccount.user_guid;
+          console.log('✅ Using default account credentials');
+        } else {
+          console.warn('⚠️ No default account found');
+        }
+      }
+      
+      if (!apiToken || !userGuid) {
+        throw new Error('No EcoTrack credentials available for fetching communes');
+      }
+
+      const requestData = {
+        api_token: apiToken,
+        user_guid: userGuid
+      };
+
+      // Add wilaya_id if specified
+      if (wilayaId) {
+        requestData.wilaya_id = wilayaId;
+      }
+
+      console.log(`🌍 Making request to EcoTrack communes API...`);
+      console.log('📤 Request data:', {
+        ...requestData,
+        api_token: `***${apiToken.slice(-4)}` // Hide token in logs
+      });
+
+      // Try GET method instead of POST since API returns 405 for POST
+      const response = await axios.get('https://app.noest-dz.com/api/public/get/communes', {
+        params: requestData, // Send as query parameters instead of request body
+        headers: {
+          'Accept': 'application/json',
+        },
+        timeout: 30000
+      });
+
+      console.log('� Raw communes API response:', {
+        status: response.status,
+        statusText: response.statusText,
+        dataType: typeof response.data,
+        dataLength: Array.isArray(response.data) ? response.data.length : 'Not array',
+        sampleData: Array.isArray(response.data) ? response.data.slice(0, 2) : response.data
+      });
+
+      if (response.data && Array.isArray(response.data)) {
+        const communes = response.data;
+        console.log(`✅ Fetched ${communes.length} communes from EcoTrack API`);
+        if (communes.length > 0) {
+          console.log('📊 Sample communes:', communes.slice(0, 3).map(c => ({
+            nom: c.nom,
+            wilaya_id: c.wilaya_id,
+            code_postal: c.code_postal
+          })));
+        }
+        return communes;
+      } else {
+        console.warn('⚠️ Unexpected response format from communes API:', response.data);
+        return [];
+      }
+
+    } catch (error) {
+      console.error('❌ Failed to fetch communes from EcoTrack API:', error.message);
+      if (error.response) {
+        console.error('❌ Response status:', error.response.status);
+        console.error('❌ Response data:', error.response.data);
+      }
+      return [];
+    }
+  }
+
+  /**
+   * Fetch wilayas directly from EcoTrack API
+   * @returns {Promise<Array>} - Array of wilayas with their codes, names, and active status
+   */
+  async fetchWilayasFromEcoTrack() {
+    try {
+      console.log('🗺️ Starting fetchWilayasFromEcoTrack...');
+      
+      // Ensure we have credentials
+      await this.ensureConfigLoaded();
+      
+      // Use any available account for fetching wilayas
+      let apiToken = this.apiToken;
+      let userGuid = this.userGuid;
+      
+      console.log('� Checking credentials:', {
+        globalApiToken: !!this.apiToken,
+        globalUserGuid: !!this.userGuid
+      });
+      
+      // Try to get credentials from default account if global config not available
+      if (!apiToken || !userGuid) {
+        console.log('🔄 Global credentials not available, trying default account...');
+        const defaultAccount = await this.getDefaultAccount();
+        if (defaultAccount) {
+          apiToken = defaultAccount.api_token;
+          userGuid = defaultAccount.user_guid;
+          console.log('✅ Using default account credentials');
+        } else {
+          console.warn('⚠️ No default account found');
+        }
+      }
+      
+      if (!apiToken || !userGuid) {
+        throw new Error('No EcoTrack credentials available for fetching wilayas');
+      }
+
+      const requestData = {
+        api_token: apiToken,
+        user_guid: userGuid
+      };
+
+      console.log(`🗺️ Making request to EcoTrack wilayas API...`);
+      console.log('📤 Request data:', {
+        ...requestData,
+        api_token: `***${apiToken.slice(-4)}` // Hide token in logs
+      });
+
+      // Try GET method first (since communes API needed GET instead of POST)
+      let response;
+      try {
+        response = await axios.get('https://app.noest-dz.com/api/public/get/wilayas', {
+          params: requestData,
+          headers: {
+            'Accept': 'application/json',
+          },
+          timeout: 30000
+        });
+      } catch (error) {
+        if (error.response?.status === 405) {
+          console.log('� GET method not allowed, trying POST...');
+          // If GET fails with 405, try POST as documented
+          response = await axios.post('https://app.noest-dz.com/api/public/get/wilayas', requestData, {
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            timeout: 30000
+          });
+        } else {
+          throw error;
+        }
+      }
+
+      console.log('� Raw wilayas API response:', {
+        status: response.status,
+        statusText: response.statusText,
+        dataType: typeof response.data,
+        dataLength: Array.isArray(response.data) ? response.data.length : 'Not array',
+        sampleData: Array.isArray(response.data) ? response.data.slice(0, 3) : response.data
+      });
+
+      if (response.data && Array.isArray(response.data)) {
+        const wilayas = response.data;
+        console.log(`✅ Fetched ${wilayas.length} wilayas from EcoTrack API`);
+        if (wilayas.length > 0) {
+          console.log('📊 Sample wilayas:', wilayas.slice(0, 5).map(w => ({
+            code: w.code,
+            nom: w.nom,
+            is_active: w.is_active
+          })));
+        }
+        
+        // Return raw data without any transformation or filtering
+        return wilayas;
+      } else {
+        console.warn('⚠️ Unexpected response format from wilayas API:', response.data);
+        return [];
+      }
+
+    } catch (error) {
+      console.error('❌ Failed to fetch wilayas from EcoTrack API:', error.message);
+      if (error.response) {
+        console.error('❌ Response status:', error.response.status);
+        console.error('❌ Response data:', error.response.data);
+      }
+      return [];
+    }
+  }
+
+  /**
+   * Get wilayas list from EcoTrack API (returns raw data without filtering)
+   * @returns {Promise<Array>} - Array of wilayas exactly as returned by EcoTrack API
+   */
+  async getWilayasFromEcoTrack() {
+    try {
+      console.log('🗺️ Starting getWilayasFromEcoTrack (returning raw data)...');
+      
+      const wilayas = await this.fetchWilayasFromEcoTrack();
+      
+      console.log(`📊 Fetched ${wilayas.length} wilayas from EcoTrack API`);
+      
+      if (wilayas.length === 0) {
+        console.warn('⚠️ No wilayas returned from EcoTrack API, checking credentials...');
+        await this.ensureConfigLoaded();
+        console.log('🔑 API Token available:', !!this.apiToken);
+        console.log('🔑 User GUID available:', !!this.userGuid);
+        return [];
+      }
+      
+      // Return all wilayas without any filtering or transformation
+      console.log(`✅ Returning ${wilayas.length} wilayas (raw data from EcoTrack API)`);
+      console.log('📋 Sample raw wilayas:', wilayas.slice(0, 5));
+      
+      return wilayas;
+    } catch (error) {
+      console.error('❌ Failed to get wilayas from EcoTrack:', error.message);
+      console.error('❌ Error stack:', error.stack);
+      return [];
+    }
+  }
+
+  /**
+   * Get wilaya name by ID (basic mapping for display purposes)
+   */
+  getWilayaNameById(wilayaId) {
+    const wilayaNames = {
+      1: 'Adrar', 2: 'Chlef', 3: 'Laghouat', 4: 'Oum El Bouaghi', 5: 'Batna',
+      6: 'Bejaia', 7: 'Biskra', 8: 'Bechar', 9: 'Blida', 10: 'Bouira',
+      11: 'Tamanrasset', 12: 'Tebessa', 13: 'Tlemcen', 14: 'Tiaret', 15: 'Tizi Ouzou',
+      16: 'Alger', 17: 'Djelfa', 18: 'Jijel', 19: 'Setif', 20: 'Saida',
+      21: 'Skikda', 22: 'Sidi Bel Abbes', 23: 'Annaba', 24: 'Guelma', 25: 'Constantine',
+      26: 'Medea', 27: 'Mostaganem', 28: 'Msila', 29: 'Mascara', 30: 'Ouargla',
+      31: 'Oran', 32: 'El Bayadh', 33: 'Illizi', 34: 'Bordj Bou Arreridj', 35: 'Boumerdes',
+      36: 'El Taref', 37: 'Tindouf', 38: 'Tissemsilt', 39: 'El Oued', 40: 'Khenchela',
+      41: 'Souk Ahras', 42: 'Tipaza', 43: 'Mila', 44: 'Ain Defla', 45: 'Naama',
+      46: 'Ain Temouchent', 47: 'Ghardaia', 48: 'Relizane', 49: 'Timimoun', 50: 'Bordj Badji Mokhtar',
+      51: 'Ouled Djellal', 52: 'Beni Abbes', 53: 'In Salah', 54: 'In Guezzam', 55: 'Touggourt',
+      56: 'Djanet', 57: 'El Meghaier', 58: 'El Meniaa'
+    };
+    return wilayaNames[wilayaId] || `Wilaya ${wilayaId}`;
   }
 }
 

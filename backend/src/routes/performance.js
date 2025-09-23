@@ -63,6 +63,18 @@ router.get('/reports', authenticateToken, requireAnyPermission(['canViewReports'
       WHERE ${whereClause}
     `;
 
+    // Debug: Check if performance_metrics table has data
+    const debugQuery = `
+      SELECT COUNT(*) as total_records, 
+             MIN(date) as earliest_date, 
+             MAX(date) as latest_date,
+             COUNT(DISTINCT user_id) as unique_users
+      FROM performance_metrics
+    `;
+
+    console.log('Performance query WHERE clause:', whereClause);
+    console.log('Performance query params:', queryParams);
+
     // Cleaner details query with better formatting
     const detailsQuery = `
       SELECT 
@@ -76,8 +88,8 @@ router.get('/reports', authenticateToken, requireAnyPermission(['canViewReports'
         pm.orders_delivered,
         ROUND(
           CASE 
-            WHEN pm.orders_confirmed > 0 
-            THEN (pm.orders_delivered / pm.orders_confirmed) * 100 
+            WHEN pm.orders_assigned > 0 
+            THEN (pm.orders_confirmed / pm.orders_assigned) * 100 
             ELSE 0 
           END, 
         1) as success_rate
@@ -90,12 +102,18 @@ router.get('/reports', authenticateToken, requireAnyPermission(['canViewReports'
 
     const [summaryResult] = await pool.query(summaryQuery, queryParams);
     const [details] = await pool.query(detailsQuery, queryParams);
+    
+    // Debug: Check table data
+    const [debugResult] = await pool.query(debugQuery);
+    console.log('Performance metrics debug:', debugResult[0]);
+    console.log('Summary result:', summaryResult[0]);
+    console.log('Details count:', details.length);
 
     const summary = summaryResult[0] || {};
 
-    // Calculate overall success rate
-    const overallSuccessRate = summary.total_confirmed > 0 
-      ? Math.round((summary.total_delivered / summary.total_confirmed) * 100)
+    // Calculate overall success rate based on confirmed orders
+    const overallSuccessRate = summary.total_assigned > 0 
+      ? Math.round((summary.total_confirmed / summary.total_assigned) * 100)
       : 0;
 
     res.json({

@@ -98,10 +98,10 @@ export const orderService = {
     return api.get(`/orders/${id}/tracking`)
   },
 
-  // Delivery management methods
+  // Delivery management methods - Updated to use EcoTrack API
   getWilayas: async () => {
     try {
-      const response = await api.get('/orders/wilayas');
+      const response = await api.get('/ecotrack/wilayas');
       return response.data;
     } catch (error) {
       console.error('OrderService.getWilayas error:', error);
@@ -111,7 +111,7 @@ export const orderService = {
 
   getBaladiasByWilaya: async (wilayaId) => {
     try {
-      const response = await api.get(`/orders/wilayas/${wilayaId}/baladias`);
+      const response = await api.get(`/ecotrack/communes?wilaya_id=${wilayaId}`);
       return response.data;
     } catch (error) {
       console.error('OrderService.getBaladiasByWilaya error:', error);

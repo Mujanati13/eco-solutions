@@ -94,6 +94,15 @@ class StockService {
     }
   }
 
+  async adjustStock(adjustmentData) {
+    try {
+      const response = await api.post('/stock/stock-adjustments', adjustmentData)
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error
+    }
+  }
+
   async getMovementHistory(productId, params = {}) {
     try {
       const response = await api.get(`/stock/stock-movements/product/${productId}`, { params })

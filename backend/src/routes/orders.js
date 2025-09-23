@@ -1099,6 +1099,9 @@ router.put('/:id/assign', authenticateToken, requirePermission('canAssignOrders'
       VALUES (?, ?, ?, ?)
     `, [orderId, req.user.id, 'assigned', `Order assigned to user ID ${assigned_to}`]);
 
+    // Update performance metrics for the assigned user
+    await updatePerformanceMetrics(assigned_to, 'assigned');
+
     res.json({ message: 'Order assigned successfully' });
   } catch (error) {
     console.error('Assign order error:', error);
@@ -1165,6 +1168,9 @@ router.post('/distribute', authenticateToken, requirePermission('canDistributeOr
         'INSERT INTO tracking_logs (order_id, user_id, action, details) VALUES (?, ?, ?, ?)',
         [order.id, req.user.id, 'assigned', `Auto-distributed to employee ID ${employeeId}`]
       );
+
+      // Update performance metrics for the assigned employee
+      await updatePerformanceMetrics(employeeId, 'assigned');
 
       distributed++;
       employeeIndex = (employeeIndex + 1) % activeEmployees.length;
@@ -1466,9 +1472,12 @@ async function updatePerformanceMetrics(userId, newStatus) {
       );
     }
 
-    // Update counters based on status
+    // Update counters based on status or action
     let updateField = '';
     switch (newStatus) {
+      case 'assigned':
+        updateField = 'orders_assigned = orders_assigned + 1';
+        break;
       case 'confirmed':
         updateField = 'orders_confirmed = orders_confirmed + 1';
         break;

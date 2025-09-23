@@ -373,6 +373,32 @@ router.post('/create-order',
         });
       }
       
+      // Handle EcoTrack API errors (success: false responses)
+      if (error.message && error.message.includes('EcoTrack API Error:')) {
+        const ecotrackErrorMessage = error.message.replace('EcoTrack API Error: ', '');
+        return res.status(400).json({
+          success: false,
+          message: 'EcoTrack API Error',
+          error: ecotrackErrorMessage,
+          code: 'ECOTRACK_API_ERROR'
+        });
+      }
+      
+      // Handle other validation errors with more specific status codes
+      if (error.message && (
+        error.message.includes('station') || 
+        error.message.includes('wilaya') || 
+        error.message.includes('commune') ||
+        error.message.includes('validation')
+      )) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation Error',
+          error: error.message,
+          code: 'VALIDATION_ERROR'
+        });
+      }
+      
       res.status(500).json({
         success: false,
         message: 'Failed to create order in EcoTrack',
@@ -526,6 +552,110 @@ router.get('/stations',
         message: 'Failed to fetch station codes',
         error: error.message,
         details: 'Make sure EcoTrack credentials are configured correctly'
+      });
+    }
+  }
+);
+
+// Get communes from EcoTrack API
+router.get('/communes', 
+  authenticateToken, 
+  requirePermission('canViewIntegrations'), 
+  async (req, res) => {
+    try {
+      const { wilaya_id } = req.query;
+      
+      console.log(`🌍 EcoTrack communes endpoint called${wilaya_id ? ` for wilaya ${wilaya_id}` : ' (all)'} by user:`, req.user?.name || req.user?.id);
+      
+      const communes = await ecotrackService.fetchCommunesFromEcoTrack(wilaya_id ? parseInt(wilaya_id) : null);
+      
+      console.log(`✅ Successfully fetched ${communes.length} communes from EcoTrack API`);
+      console.log('📊 Sample communes:', communes.slice(0, 3).map(c => ({ nom: c.nom, wilaya_id: c.wilaya_id })));
+      
+      res.json({
+        success: true,
+        message: wilaya_id ? `Communes fetched successfully for wilaya ${wilaya_id}` : 'All communes fetched successfully',
+        data: communes,
+        count: communes.length,
+        wilaya_id: wilaya_id ? parseInt(wilaya_id) : null
+      });
+      
+    } catch (error) {
+      console.error('❌ Error getting EcoTrack communes:', error);
+      console.error('❌ Error stack:', error.stack);
+      
+      res.status(500).json({ 
+        success: false, 
+        message: 'Failed to fetch communes',
+        error: error.message,
+        details: 'Make sure EcoTrack credentials are configured correctly'
+      });
+    }
+  }
+);
+
+// Get wilayas list from EcoTrack API
+router.get('/wilayas', 
+  authenticateToken, 
+  requirePermission('canViewIntegrations'), 
+  async (req, res) => {
+    try {
+      console.log('🗺️ EcoTrack wilayas endpoint called by user:', req.user?.name || req.user?.id);
+      
+      const wilayas = await ecotrackService.getWilayasFromEcoTrack();
+      
+      console.log(`✅ Successfully fetched ${wilayas.length} wilayas from EcoTrack API`);
+      console.log('📊 Sample wilayas:', wilayas.slice(0, 5).map(w => ({ id: w.id, name: w.name, commune_count: w.commune_count })));
+      
+      res.json({
+        success: true,
+        message: 'Wilayas fetched successfully',
+        data: wilayas,
+        count: wilayas.length
+      });
+      
+    } catch (error) {
+      console.error('❌ Error getting EcoTrack wilayas:', error);
+      console.error('❌ Error stack:', error.stack);
+      
+      res.status(500).json({ 
+        success: false, 
+        message: 'Failed to fetch wilayas',
+        error: error.message,
+        details: 'Make sure EcoTrack credentials are configured correctly'
+      });
+    }
+  }
+);
+
+// Test endpoint to directly call EcoTrack communes API
+router.get('/test-communes', 
+  authenticateToken, 
+  requirePermission('canViewIntegrations'), 
+  async (req, res) => {
+    try {
+      console.log('🧪 EcoTrack test-communes endpoint called by user:', req.user?.name || req.user?.id);
+      
+      const communes = await ecotrackService.fetchCommunesFromEcoTrack();
+      
+      console.log(`🧪 Test: Fetched ${communes.length} communes from EcoTrack API`);
+      
+      res.json({
+        success: true,
+        message: 'Test communes fetch completed',
+        data: communes,
+        count: communes.length,
+        sample: communes.slice(0, 10)
+      });
+      
+    } catch (error) {
+      console.error('❌ Error in test-communes:', error);
+      console.error('❌ Error stack:', error.stack);
+      
+      res.status(500).json({ 
+        success: false, 
+        message: 'Test communes fetch failed',
+        error: error.message
       });
     }
   }

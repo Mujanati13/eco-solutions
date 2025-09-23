@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard/Dashboard'
 import './styles/theme.css'
 import Orders from './pages/Orders/Orders'
 import OrderManagement from './pages/OrderManagement/OrderManagment-html'
+import OrderManagementV2 from './pages/OrderManagement/OrderManagement'
 import OrderTracking from './pages/OrderTracking/OrderTracking'
 import Users from './pages/Users/Users'
 import Profile from './pages/Profile/Profile'
@@ -59,6 +60,7 @@ function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="orders" element={<Orders />} />
             <Route path="order-management" element={<OrderManagement />} />
+            <Route path="order-management-v2" element={<OrderManagementV2 />} />
             <Route path="order-tracking" element={<OrderTracking />} />
             <Route path="users" element={
               <PermissionRoute permission="canViewUsers">

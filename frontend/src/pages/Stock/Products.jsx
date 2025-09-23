@@ -664,12 +664,7 @@ const Products = () => {
       key: 'actions',
       render: (_, record) => {
         const menuItems = [
-          {
-            key: 'viewOrders',
-            icon: <ShoppingCartOutlined />,
-            label: t('stock.viewOrders'),
-            onClick: () => handleShowOrderDetails(record),
-          },
+          
           {
             key: 'manageVariants',
             icon: <BranchesOutlined />,

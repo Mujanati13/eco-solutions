@@ -73,6 +73,11 @@ const MainLayout = () => {
         key: '/order-management',
         label: t('nav.orderManagement'),
       })
+      // Old interface (Ant Design) as v2
+      orderSubmenuItems.push({
+        key: '/order-management-v2',
+        label: "GC V2",
+      })
     }
     
     // Order tracking is available to all authenticated users

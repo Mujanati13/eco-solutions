@@ -253,12 +253,22 @@ const PerformanceReports = () => {
       key: "success_rate",
       width: 120,
       align: "center",
-      render: (rate) => (
-        <Tag color={getSuccessRateColor(rate)}>
-          {rate.toFixed(1)}%
-        </Tag>
-      ),
-      sorter: (a, b) => a.success_rate - b.success_rate,
+      render: (rate, record) => {
+        // Calculate success rate based on confirmed orders
+        const confirmedRate = record.orders_assigned > 0 
+          ? (record.orders_confirmed / record.orders_assigned) * 100 
+          : 0;
+        return (
+          <Tag color={getSuccessRateColor(confirmedRate)} title={`${record.orders_confirmed} confirmées sur ${record.orders_assigned} assignées`}>
+            {confirmedRate.toFixed(1)}%
+          </Tag>
+        );
+      },
+      sorter: (a, b) => {
+        const aRate = a.orders_assigned > 0 ? (a.orders_confirmed / a.orders_assigned) * 100 : 0;
+        const bRate = b.orders_assigned > 0 ? (b.orders_confirmed / b.orders_assigned) * 100 : 0;
+        return aRate - bRate;
+      },
     },
   ];
 

@@ -611,9 +611,11 @@ const OrderTracking = () => {
 
     // Show Ecotrack details if available
     if (ecotrackDetails) {
-      const latestActivity = ecotrackDetails.activity && ecotrackDetails.activity.length > 0 
-        ? ecotrackDetails.activity[0] 
-        : null;
+      // Ensure activity is sorted with latest first
+      const sortedActivity = Array.isArray(ecotrackDetails.activity)
+        ? [...ecotrackDetails.activity].sort((a, b) => new Date(b.date) - new Date(a.date))
+        : [];
+      const latestActivity = sortedActivity.length > 0 ? sortedActivity[0] : null;
 
       return (
         <div>
@@ -685,11 +687,11 @@ const OrderTracking = () => {
           </Descriptions>
 
           {/* Ecotrack Activity Timeline */}
-          {ecotrackDetails.activity && ecotrackDetails.activity.length > 0 && (
+          {sortedActivity.length > 0 && (
             <div>
               <Title level={4}>{t("tracking.ecotrackHistory")}</Title>
               <Timeline mode="left">
-                {ecotrackDetails.activity.map((item, index) => (
+                {sortedActivity.map((item, index) => (
                   <Timeline.Item
                     key={index}
                     color={index === 0 ? "blue" : "green"}
