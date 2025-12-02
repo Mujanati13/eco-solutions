@@ -60,7 +60,7 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
     ]
   : [
       'http://localhost:3000',
-      'https://api-ecosalbech.me',
+      'https://api-ecos.albech.me',
       'http://127.0.0.1:3000',
       'http://127.0.0.1:5173'
     ];
