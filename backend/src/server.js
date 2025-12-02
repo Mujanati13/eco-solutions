@@ -55,12 +55,12 @@ app.use('/api/', limiter);
 // CORS configuration
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? [
-      process.env.FRONTEND_URL || 'https://yourdomain.com',
-      process.env.CLIENT_URL || 'https://yourdomain.com'
+      process.env.FRONTEND_URL || 'https://api-ecosalbech.me',
+      process.env.CLIENT_URL || 'https://api-ecosalbech.me'
     ]
   : [
       'http://localhost:3000',
-      'http://localhost:5173',
+      'https://api-ecosalbech.me',
       'http://127.0.0.1:3000',
       'http://127.0.0.1:5173'
     ];
