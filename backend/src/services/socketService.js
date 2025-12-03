@@ -14,8 +14,10 @@ class SocketService {
   initialize(server) {
     const allowedOrigins = process.env.NODE_ENV === 'production' 
       ? [
-          process.env.FRONTEND_URL || 'https://yourdomain.com',
-          process.env.CLIENT_URL || 'https://yourdomain.com'
+          process.env.FRONTEND_URL || 'https://eco-s.albech.me',
+          process.env.CLIENT_URL || 'https://eco-s.albech.me',
+          'https://eco-s.albech.me',
+          'https://api-ecos.albech.me'
         ]
       : [
           'http://localhost:3000',
