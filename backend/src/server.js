@@ -39,8 +39,37 @@ const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 
+// CORS configuration - MUST be before helmet and other middleware
+const allowedOrigins = [
+  // Production domains
+  'https://eco-s.albech.me',
+  'https://api-ecos.albech.me',
+  process.env.FRONTEND_URL,
+  process.env.CLIENT_URL,
+  // Development domains
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173'
+].filter(Boolean); // Remove undefined values
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+}));
+
+// Handle preflight requests explicitly
+app.options('*', cors());
+
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -51,26 +80,6 @@ const limiter = rateLimit({
   }
 });
 app.use('/api/', limiter);
-
-// CORS configuration
-const allowedOrigins = process.env.NODE_ENV === 'production' 
-  ? [
-      process.env.FRONTEND_URL || 'https://eco-s.albech.me',
-      process.env.CLIENT_URL || 'https://eco-s.albech.me'
-    ]
-  : [
-      'http://localhost:3000',
-      'https://eco-s.albech.me',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:5173'
-    ];
-
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
-}));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
