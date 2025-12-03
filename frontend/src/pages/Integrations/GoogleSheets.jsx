@@ -188,7 +188,8 @@ const GoogleSheetsAutoImport = () => {
       setLoading(true);
       setScanProgress({ current: 0, total: 100, status: 'Scanning Google Drive...' });
       
-      const response = await api.post('/auto-import/scan-all');
+      // Use longer timeout for scan operation (5 minutes)
+      const response = await api.post('/auto-import/scan-all', {}, { timeout: 300000 });
       const result = response.data;
       
       if (result.success) {
