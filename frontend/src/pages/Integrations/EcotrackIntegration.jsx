@@ -30,6 +30,7 @@ import { useTranslation } from 'react-i18next';
 import { ecotrackService } from '../../services/ecotrackService';
 import { configService } from '../../services/configService';
 import EcotrackMultiAccount from './EcotrackMultiAccount';
+import api from '../../services/api';
 import './EcotrackIntegration.css';
 
 const { Title, Text, Paragraph } = Typography;
@@ -59,48 +60,28 @@ const EcotrackIntegration = () => {
         console.log(`🧪 Testing GUID: "${testGuid}" (${testGuid.length} characters)`);
         
         // Save the test GUID
-        const saveResponse = await fetch('/api/ecotrack/config', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          },
-          body: JSON.stringify({
-            apiToken: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
-            userGuid: testGuid,
-            isEnabled: true
-          })
+        const saveResponse = await api.post('/ecotrack/config', {
+          apiToken: 'PqIG59oLQNvQdNYuy7rlFm8ZCwAD2qgp5cG',
+          userGuid: testGuid,
+          isEnabled: true
         });
 
-        if (saveResponse.ok) {
-          const saveResult = await saveResponse.json();
-          console.log('✅ Save successful');
+        console.log('✅ Save successful');
 
-          // Check what was actually stored
-          const checkResponse = await fetch('/api/ecotrack/credentials', {
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('token')}`
-            }
-          });
-
-          if (checkResponse.ok) {
-            const checkResult = await checkResponse.json();
-            const storedGuid = checkResult.userGuid;
-            
-            console.log('📊 Results:');
-            console.log(`   Input: "${testGuid}" (${testGuid.length} chars)`);
-            console.log(`   Stored: "${storedGuid}" (${storedGuid.length} chars)`);
-            console.log(`   Truncated: ${testGuid !== storedGuid ? 'YES ❌' : 'NO ✅'}`);
-            
-            if (testGuid !== storedGuid) {
-              console.log(`   Lost: "${testGuid.slice(storedGuid.length)}"`);
-            }
-            
-            return { input: testGuid, stored: storedGuid, truncated: testGuid !== storedGuid };
-          }
-        } else {
-          console.log('❌ Save failed:', saveResponse.status);
+        // Check what was actually stored
+        const checkResponse = await api.get('/ecotrack/credentials');
+        const storedGuid = checkResponse.data.userGuid;
+        
+        console.log('📊 Results:');
+        console.log(`   Input: "${testGuid}" (${testGuid.length} chars)`);
+        console.log(`   Stored: "${storedGuid}" (${storedGuid.length} chars)`);
+        console.log(`   Truncated: ${testGuid !== storedGuid ? 'YES ❌' : 'NO ✅'}`);
+        
+        if (testGuid !== storedGuid) {
+          console.log(`   Lost: "${testGuid.slice(storedGuid.length)}"`);
         }
+        
+        return { input: testGuid, stored: storedGuid, truncated: testGuid !== storedGuid };
       } catch (error) {
         console.error('❌ Test failed:', error);
       }
@@ -108,7 +89,7 @@ const EcotrackIntegration = () => {
     
     // Add credential debugging functions
     window.debugEcotrackCredentials = async () => {
-      console.log('� DEBUGGING ECOTRACK CREDENTIALS');
+      console.log('🔍 DEBUGGING ECOTRACK CREDENTIALS');
       console.log('=' .repeat(50));
       
       try {
@@ -138,7 +119,7 @@ const EcotrackIntegration = () => {
       }
     };
     
-    console.log('�🛠️ Debug functions available:');
+    console.log('🛠️ Debug functions available:');
     console.log('   window.testEcotrackGuidLength("2QG0JDFPf")');
     console.log('   window.debugEcotrackCredentials()');
   }, []);
@@ -147,29 +128,23 @@ const EcotrackIntegration = () => {
   const loadConfiguration = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/ecotrack/config', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+      const response = await api.get('/ecotrack/config');
+      const data = response.data;
+      
+      setConfig({
+        apiToken: data.fullApiToken || data.apiToken || '',
+        userGuid: data.fullUserGuid || data.userGuid || '',
+        isEnabled: data.isEnabled || false
       });
       
-      if (response.ok) {
-        const data = await response.json();
-        setConfig({
-          apiToken: data.fullApiToken || data.apiToken || '',
-          userGuid: data.fullUserGuid || data.userGuid || '',
-          isEnabled: data.isEnabled || false
-        });
-        
-        form.setFieldsValue({
-          apiToken: data.fullApiToken || data.apiToken || '',
-          userGuid: data.fullUserGuid || data.userGuid || '',
-          isEnabled: data.isEnabled || false
-        });
-        
-        if ((data.fullApiToken || data.apiToken) && (data.fullUserGuid || data.userGuid)) {
-          setConfigSaved(true);
-        }
+      form.setFieldsValue({
+        apiToken: data.fullApiToken || data.apiToken || '',
+        userGuid: data.fullUserGuid || data.userGuid || '',
+        isEnabled: data.isEnabled || false
+      });
+      
+      if ((data.fullApiToken || data.apiToken) && (data.fullUserGuid || data.userGuid)) {
+        setConfigSaved(true);
       }
     } catch (error) {
       console.error('Error loading configuration:', error);
@@ -183,39 +158,28 @@ const EcotrackIntegration = () => {
     try {
       setLoading(true);
       
-      const response = await fetch('/api/ecotrack/config', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          apiToken: values.apiToken,
-          userGuid: values.userGuid,
-          isEnabled: values.isEnabled || false
-        })
+      const response = await api.post('/ecotrack/config', {
+        apiToken: values.apiToken,
+        userGuid: values.userGuid,
+        isEnabled: values.isEnabled || false
       });
 
-      if (response.ok) {
-        setConfig({
-          apiToken: values.apiToken,
-          userGuid: values.userGuid,
-          isEnabled: values.isEnabled || false
-        });
-        setConfigSaved(true);
-        setConnectionStatus(null); // Reset connection status when config changes
-        
-        // Clear the credentials cache so next API calls get fresh credentials
-        configService.refreshCredentials();
-        
-        message.success(t('ecotrack.configSaved'));
-      } else {
-        const error = await response.json();
-        message.error(t('ecotrack.configSaveError') + ': ' + (error.message || 'Unknown error'));
-      }
+      setConfig({
+        apiToken: values.apiToken,
+        userGuid: values.userGuid,
+        isEnabled: values.isEnabled || false
+      });
+      setConfigSaved(true);
+      setConnectionStatus(null); // Reset connection status when config changes
+      
+      // Clear the credentials cache so next API calls get fresh credentials
+      configService.refreshCredentials();
+      
+      message.success(t('ecotrack.configSaved'));
     } catch (error) {
       console.error('Error saving configuration:', error);
-      message.error(t('ecotrack.configSaveError') + ': ' + error.message);
+      const errorMsg = error.response?.data?.message || error.message;
+      message.error(t('ecotrack.configSaveError') + ': ' + errorMsg);
     } finally {
       setLoading(false);
     }
@@ -234,21 +198,14 @@ const EcotrackIntegration = () => {
         return;
       }
 
-      const response = await fetch('/api/ecotrack/test-connection', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          apiToken: formValues.apiToken,
-          userGuid: formValues.userGuid
-        })
+      const response = await api.post('/ecotrack/test-connection', {
+        apiToken: formValues.apiToken,
+        userGuid: formValues.userGuid
       });
 
-      const result = await response.json();
+      const result = response.data;
       
-      if (response.ok && result.success) {
+      if (result.success) {
         setConnectionStatus({
           success: true,
           message: result.message || t('ecotrack.connectionSuccess')
@@ -263,11 +220,12 @@ const EcotrackIntegration = () => {
       }
     } catch (error) {
       console.error('Error testing connection:', error);
+      const errorMsg = error.response?.data?.message || error.message;
       setConnectionStatus({
         success: false,
-        message: error.message
+        message: errorMsg
       });
-      message.error(t('ecotrack.connectionError') + ': ' + error.message);
+      message.error(t('ecotrack.connectionError') + ': ' + errorMsg);
     } finally {
       setTesting(false);
     }

@@ -34,6 +34,7 @@ import {
   SyncOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import api from '../../services/api';
 import './EcotrackIntegration.css';
 
 const { Title, Text, Paragraph } = Typography;
@@ -61,16 +62,8 @@ const EcotrackMultiAccount = () => {
   // Load available locations (boutiques)
   const loadLocations = async () => {
     try {
-      const response = await fetch('/api/boutiques/locations', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setLocations(data.locations || []);
-      }
+      const response = await api.get('/boutiques/locations');
+      setLocations(response.data.locations || []);
     } catch (error) {
       console.error('Error loading locations:', error);
       message.error('Failed to load boutiques');
@@ -81,16 +74,8 @@ const EcotrackMultiAccount = () => {
   const loadAccounts = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/ecotrack-multi-account/accounts', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setAccounts(data.accounts || []);
-      }
+      const response = await api.get('/ecotrack-multi-account/accounts');
+      setAccounts(response.data.accounts || []);
     } catch (error) {
       console.error('Error loading accounts:', error);
       message.error('Failed to load EcoTrack accounts');
@@ -105,42 +90,34 @@ const EcotrackMultiAccount = () => {
       setLoading(true);
       
       const url = editingAccount 
-        ? `/api/ecotrack-multi-account/accounts/${editingAccount.id}`
-        : '/api/ecotrack-multi-account/accounts';
+        ? `/ecotrack-multi-account/accounts/${editingAccount.id}`
+        : '/ecotrack-multi-account/accounts';
       
-      const method = editingAccount ? 'PUT' : 'POST';
-      
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          location_id: values.location_id,
-          account_name: values.account_name,
-          api_token: values.api_token,
-          user_guid: values.user_guid,
-          is_enabled: values.is_enabled || true,
-          is_default: values.is_default || false
-        })
-      });
+      const payload = {
+        location_id: values.location_id,
+        account_name: values.account_name,
+        api_token: values.api_token,
+        user_guid: values.user_guid,
+        is_enabled: values.is_enabled || true,
+        is_default: values.is_default || false
+      };
 
-      if (response.ok) {
-        const result = await response.json();
-        message.success(editingAccount ? 'Account updated successfully' : 'Account created successfully');
-        setModalVisible(false);
-        form.resetFields();
-        editForm.resetFields();
-        setEditingAccount(null);
-        await loadAccounts();
+      if (editingAccount) {
+        await api.put(url, payload);
       } else {
-        const error = await response.json();
-        message.error(error.message || 'Failed to save account');
+        await api.post(url, payload);
       }
+
+      message.success(editingAccount ? 'Account updated successfully' : 'Account created successfully');
+      setModalVisible(false);
+      form.resetFields();
+      editForm.resetFields();
+      setEditingAccount(null);
+      await loadAccounts();
     } catch (error) {
       console.error('Error saving account:', error);
-      message.error('Failed to save account');
+      const errorMsg = error.response?.data?.message || 'Failed to save account';
+      message.error(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -152,22 +129,15 @@ const EcotrackMultiAccount = () => {
       setTesting(true);
       setTestResults(prev => ({ ...prev, [account.id]: 'testing' }));
       
-      const response = await fetch('/api/ecotrack-multi-account/test-connection', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          account_id: account.id,
-          api_token: account.api_token,
-          user_guid: account.user_guid
-        })
+      const response = await api.post('/ecotrack-multi-account/test-connection', {
+        account_id: account.id,
+        api_token: account.api_token,
+        user_guid: account.user_guid
       });
 
-      const result = await response.json();
+      const result = response.data;
       
-      if (response.ok && result.success) {
+      if (result.success) {
         setTestResults(prev => ({ ...prev, [account.id]: 'success' }));
         message.success(`Connection successful for ${account.account_name}`);
       } else {
@@ -188,23 +158,13 @@ const EcotrackMultiAccount = () => {
     try {
       setLoading(true);
       
-      const response = await fetch(`/api/ecotrack-multi-account/accounts/${accountId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (response.ok) {
-        message.success('Account deleted successfully');
-        await loadAccounts();
-      } else {
-        const error = await response.json();
-        message.error(error.message || 'Failed to delete account');
-      }
+      await api.delete(`/ecotrack-multi-account/accounts/${accountId}`);
+      message.success('Account deleted successfully');
+      await loadAccounts();
     } catch (error) {
       console.error('Error deleting account:', error);
-      message.error('Failed to delete account');
+      const errorMsg = error.response?.data?.message || 'Failed to delete account';
+      message.error(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -215,23 +175,13 @@ const EcotrackMultiAccount = () => {
     try {
       setLoading(true);
       
-      const response = await fetch(`/api/ecotrack-multi-account/accounts/${accountId}/set-default`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (response.ok) {
-        message.success('Default account updated');
-        await loadAccounts();
-      } else {
-        const error = await response.json();
-        message.error(error.message || 'Failed to set default account');
-      }
+      await api.post(`/ecotrack-multi-account/accounts/${accountId}/set-default`);
+      message.success('Default account updated');
+      await loadAccounts();
     } catch (error) {
       console.error('Error setting default account:', error);
-      message.error('Failed to set default account');
+      const errorMsg = error.response?.data?.message || 'Failed to set default account';
+      message.error(errorMsg);
     } finally {
       setLoading(false);
     }
