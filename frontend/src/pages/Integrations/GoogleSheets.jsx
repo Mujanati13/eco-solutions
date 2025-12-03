@@ -53,6 +53,7 @@ import { useTranslation } from 'react-i18next';
 import { integrationsService } from '../../services/integrationsService';
 import { usePermissions } from '../../hooks/usePermissions';
 import GoogleSheetsConnection from '../../components/GoogleSheetsConnection';
+import api from '../../services/api';
 import './GoogleSheets.css';
 
 const { Title, Text, Paragraph } = Typography;
@@ -92,17 +93,9 @@ const GoogleSheetsAutoImport = () => {
   // Load file name patterns from backend
   const loadFileNamePatterns = async () => {
     try {
-      const response = await fetch('/api/auto-import/file-patterns', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.patterns) {
-          setFileNamePatterns(result.patterns);
-        }
+      const response = await api.get('/auto-import/file-patterns');
+      if (response.data.success && response.data.patterns) {
+        setFileNamePatterns(response.data.patterns);
       }
     } catch (error) {
       console.warn('Error loading file name patterns from backend:', error);
@@ -115,16 +108,9 @@ const GoogleSheetsAutoImport = () => {
       setLoading(true);
       
       // Save file patterns to backend
-      const patternsResponse = await fetch('/api/auto-import/file-patterns', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ patterns: fileNamePatterns })
-      });
+      const patternsResponse = await api.post('/auto-import/file-patterns', { patterns: fileNamePatterns });
       
-      if (!patternsResponse.ok) {
+      if (!patternsResponse.data.success) {
         throw new Error('Failed to save file patterns to backend');
       }
       
@@ -175,20 +161,13 @@ const GoogleSheetsAutoImport = () => {
 
   const loadStatistics = async () => {
     try {
-      const response = await fetch('/api/auto-import/stats', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await api.get('/auto-import/stats');
+      const data = response.data;
+      setStatistics(data.stats);
+      setAutoScanStatus(!data.stats.isRunning);
       
-      if (response.ok) {
-        const data = await response.json();
-        setStatistics(data.stats);
-        setAutoScanStatus(!data.stats.isRunning);
-        
-        if (data.stats.last_run) {
-          setLastScanTime(new Date(data.stats.last_run));
-        }
+      if (data.stats.last_run) {
+        setLastScanTime(new Date(data.stats.last_run));
       }
     } catch (error) {
       console.error('Failed to load statistics:', error);
@@ -197,16 +176,8 @@ const GoogleSheetsAutoImport = () => {
 
   const loadProcessedFiles = async () => {
     try {
-      const response = await fetch('/api/auto-import/processed-files', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setProcessedFiles(data.files || []);
-      }
+      const response = await api.get('/auto-import/processed-files');
+      setProcessedFiles(response.data.files || []);
     } catch (error) {
       console.error('Failed to load processed files:', error);
     }
@@ -217,14 +188,8 @@ const GoogleSheetsAutoImport = () => {
       setLoading(true);
       setScanProgress({ current: 0, total: 100, status: 'Scanning Google Drive...' });
       
-      const response = await fetch('/api/auto-import/scan-all', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      const result = await response.json();
+      const response = await api.post('/auto-import/scan-all');
+      const result = response.data;
       
       if (result.success) {
         notification.success({
@@ -264,20 +229,11 @@ const GoogleSheetsAutoImport = () => {
     try {
       setLoading(true);
       
-      const endpoint = autoScanStatus ? '/api/auto-import/stop-auto-scan' : '/api/auto-import/start-auto-scan';
-      const method = 'POST';
+      const endpoint = autoScanStatus ? '/auto-import/stop-auto-scan' : '/auto-import/start-auto-scan';
       const body = autoScanStatus ? {} : { cronPattern };
       
-      const response = await fetch(endpoint, {
-        method,
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-      });
-      
-      const result = await response.json();
+      const response = await api.post(endpoint, body);
+      const result = response.data;
       
       if (result.success) {
         setAutoScanStatus(!autoScanStatus);
